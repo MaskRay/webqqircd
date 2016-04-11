@@ -4,7 +4,7 @@ webqqircd类似于bitlbee，在WebQQ(SmartQQ)和IRC间建起桥梁，可以使�
 
 ## 原理
 
-修改WebQQ用的JS，通过WebSocket把信息发送到服务端，服务端兼做IRC服务端，把IRC客户端的命令通过WebSocket传送到网页版JS执行。未实现IRC客户端，因此无法把微信群的消息转发到另一个IRC服务器(打通两个群的bot)。
+修改WebQQ用的JS，通过WebSocket把信息发送到服务端，服务端兼做IRC服务端，把IRC客户端的命令通过WebSocket传送到网页版JS执行。未实现IRC客户端，因此无法把QQ群的消息转发到另一个IRC服务器(打通两个群的bot)。
 
 ## 安装
 
@@ -35,14 +35,14 @@ Arch Linux可以安装<https://aur.archlinux.org/packages/webqqircd-git>，会�
 ### IRC客户端
 
 - IRC客户端连接127.1:6668(weechat的话使用`/server add qq 127.1/6668`)，会自动加入`+status` channel
-- 登录<https://wx.qq.com>
-- 回到IRC客户端，可以看到微信朋友加入了`+status` channel，在这个channel发信并不会群发，只是为了方便查看有哪些朋友。
-- 微信朋友的nick优先选取备注名(`RemarkName`)，其次为`DisplayName`(原始JS根据昵称等自动填写的一个名字)
+- 登录<http://w.qq.com>
+- 回到IRC客户端，可以看到QQ朋友加入了`+status` channel，在这个channel发信并不会群发，只是为了方便查看有哪些朋友。
+- QQ朋友的nick优先选取备注名(`RemarkName`)，其次为`DisplayName`(原始JS根据昵称等自动填写的一个名字)
 
 在`+status` channel可以执行一些命令：
 
 - `help`，帮助
-- `status`，已获取的微信朋友、群列表
+- `status`，已获取的QQ朋友、群列表
 - `eval $password $expr`: 如果运行时带上了`--password $password`选项，这里可以eval，方便调试，比如`eval $password client.uin2qq_user`
 
 若服务端或客户端重启，刷新WebQQ。
@@ -53,13 +53,13 @@ webqqircd是个简单的IRC服务器，可以执行通常的IRC命令，可以�
 
 以下命令会有特殊作用：
 
-- 程序默认选项为`--join auto`，收到某个微信群的第一条消息后会自动加入对应的channel，即开始接收该微信群的消息。
-- `/dcc send nick/channel filename`，给微信朋友或微信群发图片/文件。参见<https://en.wikipedia.org/wiki/Direct_Client-to-Client#DCC_SEND>
-- `/join [channel]`表示开始接收该微信群的消息
-- `/list`，列出所有微信群
+- 程序默认选项为`--join auto`，收到某个QQ群的第一条消息后会自动加入对应的channel，即开始接收该QQ群的消息。
+- `/dcc send nick/channel filename`，给QQ朋友或QQ群发图片/文件。参见<https://en.wikipedia.org/wiki/Direct_Client-to-Client#DCC_SEND>
+- `/join [channel]`表示开始接收该QQ群的消息
+- `/list`，列出所有QQ群
 - `/names`，更新当前群成员列表
-- `/part [channel]`的IRC原义为离开channel，转换为微信代表在当前IRC会话中不再接收该微信群的消息。不用担心，webqqircd并没有主动退出群的功能
-- `/query nick`打开与`$nick`的私聊窗口，与之私聊即为在微信上和他/她/它对话
+- `/part [channel]`的IRC原义为离开channel，转换为QQ代表在当前IRC会话中不再接收该QQ群的消息。不用担心，webqqircd并没有主动退出群的功能
+- `/query nick`打开与`$nick`的私聊窗口，与之私聊即为在QQ上和他/她/它对话
 - `/who channel`，查看群成员列表
 
 ## JS改动
@@ -80,7 +80,7 @@ webqqircd是个简单的IRC服务器，可以执行通常的IRC命令，可以�
 
 每隔一段时间把未投递过的联系人发送到服务端。
 
-### 收到微信服务器消息`messageProcess`
+### 收到QQ服务器消息`messageProcess`
 
 原有代码会更新未读标记数及声音提醒，现在改为若成功发送到服务端则不再提醒，以免浏览器的这个标签页造成干扰。
 
@@ -94,11 +94,11 @@ webqqircd是个简单的IRC服务器，可以执行通常的IRC命令，可以�
 ├── Server                   IRC server
 ├── Channel
 │   ├── StandardChannel      `#`开头的IRC channel
-│   ├── StatusChannel        `+status`，查看控制当前微信会话
-│   └── WeChatRoom           微信群对应的channel，仅该客户端可见
+│   ├── StatusChannel        `+status`，查看控制当前QQ会话
+│   └── WeChatRoom           QQ群对应的channel，仅该客户端可见
 ├── (User)
 │   ├── Client               IRC客户端连接
-│   ├── WeChatUser           微信用户对应的user，仅该客户端可见
+│   ├── WeChatUser           QQ用户对应的user，仅该客户端可见
 ├── (IRCCommands)
 │   ├── UnregisteredCommands 注册前可用命令：NICK USER QUIT
 │   ├── RegisteredCommands   注册后可用命令
@@ -125,5 +125,5 @@ WantedBy=multi-user.target
 
 WeeChat:
 ```
-/server add wechat 127.1/6668 -autoconnect
+/server add qq 127.1/6668 -autoconnect
 ```
