@@ -63,8 +63,8 @@ setInterval(() => {
         try {
             var buddylist = modules['mq.model.buddylist'], self = buddylist.getSelfUin()
             for (var x of buddylist.getFriends()) {
-                var nick = x.markname || x.nick
-                if (x.uin != self && (! deliveredContact.has(x.uin) || deliveredContact.get(x.uin) != nick)) {
+                var nick = x.mark || x.nick
+                if (x.uin != self && ! x.isStrange && (! deliveredContact.has(x.uin) || deliveredContact.get(x.uin) != nick)) {
                     ws.send({token: token, command: 'friend', record: {uin: x.uin, nick: nick}})
                     deliveredContact.set(x.uin, nick)
                 }
@@ -72,22 +72,20 @@ setInterval(() => {
             var groups = buddylist.getGroups()
             for (var gid in groups) {
                 gid = +gid
-                var x = groups[gid], name = x.memo || x.name,
-                    info = JSON.stringify({name: name, members: x.members ? x.members.length : 0})
+                var x = groups[gid], name = x.name, info = JSON.stringify(x)
                 if (! deliveredRoomContact.has(gid) || deliveredRoomContact.get(gid) != info) {
                     var members = x.members ? x.members.filter(y => y.uin != self) : []
-                    ws.send({token: token, command: 'room', record: {gid: gid, name: name, members: members}})
+                    ws.send({token: token, command: 'room', record: {gid: gid, name: name, memo: x.memo, members: members}})
                     deliveredRoomContact.set(gid, info)
                 }
             }
             var discuss = buddylist.getDiscuss()
             for (var did in discuss) {
                 did = +did
-                var x = discuss[did], name = x.memo || x.name,
-                    info = JSON.stringify({name: name, members: x.members ? x.members.length : 0})
+                var x = discuss[did], name = x.name, info = JSON.stringify(x)
                 if (! deliveredRoomContact.has(did) || deliveredRoomContact.get(did) != info) {
                     var members = x.members ? x.members.filter(y => y.isSelf != self) : []
-                    ws.send({token: token, command: 'room', record: {gid: did, name: name, members: members}})
+                    ws.send({token: token, command: 'room', record: {gid: did, name: name, memo: x.memo, members: members}})
                     deliveredRoomContact.set(did, info)
                 }
             }
@@ -7105,7 +7103,7 @@ define("mq.presenter.chat", ["./mq.i18n"], function() {
                         if (! u.isSelf)
                             ws.send({token: token,
                                     command: 'message',
-                                    room: {gid: g.gid, name: g.memo || g.name, owner: g.owner},
+                                    room: {gid: g.gid, name: g.name, memo: g.memo, owner: g.owner},
                                     sender: {uin: u.uin, nick: u.remark || u.nick},
                                     message: p.content[p.content.length-1]})
                     } catch (ex) {
@@ -7127,7 +7125,7 @@ define("mq.presenter.chat", ["./mq.i18n"], function() {
                         if (! u.isSelf)
                             ws.send({token: token,
                                     command: 'message',
-                                    room: {gid: g.gid, name: g.memo || g.name, owner: g.owner},
+                                    room: {gid: g.gid, name: g.name, memo: g.memo, owner: g.owner},
                                     sender: {uin: u.uin, name: u.remark || u.nick},
                                     message: p.content[p.content.length-1]})
                     } catch (ex) {

@@ -812,7 +812,6 @@ class QQRoom(Channel):
         self.record = {}
         self.idle = True      # no messages yet
         self.joined = False   # `client` has not joined
-        # For large chatrooms, record['MemberList']['Uin'] is very likely
         # to be 0, so the owner is hard to determine.
         # If the owner is determined, he/she is the only op
         self.owner = None
@@ -821,9 +820,9 @@ class QQRoom(Channel):
 
     def update(self, client, record):
         self.record.update(record)
-        self.topic = record['name']
+        self.topic = self.record.get('memo', '')
         old_name = getattr(self, 'name', None)
-        base = '&' + irc_escape(self.topic)
+        base = '&' + irc_escape(self.record.get('name'))
         if base == '&':
             base += '.'.join(member.nick for member in self.members)[:20]
         suffix = ''
@@ -1034,6 +1033,7 @@ class Client:
     def ensure_qq_room(self, record):
         assert isinstance(record['gid'], int)
         assert isinstance(record['name'], str)
+        assert isinstance(record.get('memo', ''), str)
         assert isinstance(record.get('owner', -1), int)
         if record['gid'] in self.gid2qq_room:
             room = self.gid2qq_room[record['gid']]
@@ -1314,7 +1314,7 @@ class QQUser:
     def on_who_member(self, client, channelname):
         client.reply('352 {} {} {} {} {} {} H :0 {}', client.nick, channelname,
                      self.uin, 'QQ', client.server.name,
-                     self.nick, self.uin)
+                     self.nick, self.record['nick'])
 
     def on_whois(self, client):
         client.reply('311 {} {} {} {} * :{}', client.nick, self.nick,

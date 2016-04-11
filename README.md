@@ -24,6 +24,8 @@ Arch Linux可以安装<https://aur.archlinux.org/packages/webqqircd-git>，会�
 - Chrome安装Switcheroo Redirector扩展，把<http://pub.idqqimg.com/smartqq/js/mq.js>重定向至<https://127.0.0.1:9002/mq.js>。若js更新，该路径会变化。
 - `./webqqircd.py --tls-cert a.crt --tls-key a.key`，会监听127.1:6668的IRC和127.1:9002的HTTPS与WebSocket over TLS
 
+![](https://maskray.me/static/2016-04-11-webqqircd/demo.jpg)
+
 ### HTTP、WebSocket
 
 如果嫌X.509太麻烦的话可以不用TLS，但Chrome会在console里给出警告。
@@ -54,7 +56,6 @@ webqqircd是个简单的IRC服务器，可以执行通常的IRC命令，可以�
 以下命令会有特殊作用：
 
 - 程序默认选项为`--join auto`，收到某个QQ群的第一条消息后会自动加入对应的channel，即开始接收该QQ群的消息。
-- `/dcc send nick/channel filename`，给QQ朋友或QQ群发图片/文件。参见<https://en.wikipedia.org/wiki/Direct_Client-to-Client#DCC_SEND>
 - `/join [channel]`表示开始接收该QQ群的消息
 - `/list`，列出所有QQ群
 - `/names`，更新当前群成员列表
