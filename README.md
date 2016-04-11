@@ -96,10 +96,10 @@ webqqircd是个简单的IRC服务器，可以执行通常的IRC命令，可以�
 ├── Channel
 │   ├── StandardChannel      `#`开头的IRC channel
 │   ├── StatusChannel        `+status`，查看控制当前QQ会话
-│   └── WeChatRoom           QQ群对应的channel，仅该客户端可见
+│   └── QQRoom               QQ群对应的channel，仅该客户端可见
 ├── (User)
 │   ├── Client               IRC客户端连接
-│   ├── WeChatUser           QQ用户对应的user，仅该客户端可见
+│   ├── QQUser               QQ用户对应的user，仅该客户端可见
 ├── (IRCCommands)
 │   ├── UnregisteredCommands 注册前可用命令：NICK USER QUIT
 │   ├── RegisteredCommands   注册后可用命令

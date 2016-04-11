@@ -1318,7 +1318,7 @@ class QQUser:
 
     def on_whois(self, client):
         client.reply('311 {} {} {} {} * :{}', client.nick, self.nick,
-                     self.uin, 'QQ', self.record['NickName'])
+                     self.uin, 'QQ', self.record['nick'])
 
     def on_websocket_message(self, data):
         msg = data['message']
