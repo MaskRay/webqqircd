@@ -681,7 +681,7 @@ class StatusChannel(Channel):
     instance = None
 
     def __init__(self, server):
-        super().__init__('+status')
+        super().__init__('+qq')
         self.server = server
         self.topic = "Your QQ friends are listed here. Messages wont't be broadcasted to them. Type 'help' to see available commands"
         self.members = set()
@@ -710,12 +710,11 @@ class StatusChannel(Channel):
             client.err_notonchannel(self.name)
             return
         if msg == 'help':
-            self.respond(client, 'new [token]  generate new token or use specified token')
             self.respond(client, 'help         display this help')
         elif msg == 'new':
             # TODO client.change_token(uuid.uuid1().hex)
             client.change_token('111')
-            self.respond(client, 'new token {} , please paste it to 文件传输助手 on wx.qq.com', client.token)
+            self.respond(client, 'Please reload w.qq.com to see your friend list in this channel', client.token)
         elif msg == 'status':
             self.respond(client, 'Token: {}', client.token)
             self.respond(client, 'IRC channels:')
@@ -1247,7 +1246,7 @@ class Client:
         self.name2qq_room.clear()
         self.gid2qq_room.clear()
 
-        # instead of flooding +status with massive PART messages,
+        # instead of flooding +qq with massive PART messages,
         # take the shortcut by rejoining the client
         self.nick2qq_user.clear()
         self.uin2qq_user.clear()

@@ -4,7 +4,13 @@ webqqircd类似于bitlbee，在WebQQ(SmartQQ)和IRC间建起桥梁，可以使�
 
 ## 原理
 
-修改WebQQ用的JS，通过WebSocket把信息发送到服务端，服务端兼做IRC服务端，把IRC客户端的命令通过WebSocket传送到网页版JS执行。未实现IRC客户端，因此无法把QQ群的消息转发到另一个IRC服务器(打通两个群的bot)。
+修改WebQQ(<http://w.qq.com>用的JS，通过WebSocket把信息发送到服务端，服务端兼做IRC服务端，把IRC客户端的命令通过WebSocket传送到网页版JS执行。未实现IRC客户端，因此无法把QQ群的消息转发到另一个IRC服务器(打通两个群的bot)。
+
+## WebQQ局限
+
+- WebQQ不支持发送图片，也无法获悉别人发送了图片
+- 消息发送后不知道成功与否，`mq.model.chat`中`sendMsg(h)`的`onSuccess`为空函数
+- 无法获知群信息变化(如成员变化等)`mq.model.chat`中`addGroup(x)`只判断群存在与否，不判断信息变化
 
 ## 安装
 
@@ -36,12 +42,12 @@ Arch Linux可以安装<https://aur.archlinux.org/packages/webqqircd-git>，会�
 
 ### IRC客户端
 
-- IRC客户端连接127.1:6668(weechat的话使用`/server add qq 127.1/6668`)，会自动加入`+status` channel
+- IRC客户端连接127.1:6668(weechat的话使用`/server add qq 127.1/6668`)，会自动加入`+qq` channel
 - 登录<http://w.qq.com>
-- 回到IRC客户端，可以看到QQ朋友加入了`+status` channel，在这个channel发信并不会群发，只是为了方便查看有哪些朋友。
+- 回到IRC客户端，可以看到QQ朋友加入了`+qq` channel，在这个channel发信并不会群发，只是为了方便查看有哪些朋友。
 - QQ朋友的nick优先选取备注名(`RemarkName`)，其次为`DisplayName`(原始JS根据昵称等自动填写的一个名字)
 
-在`+status` channel可以执行一些命令：
+在`+qq` channel可以执行一些命令：
 
 - `help`，帮助
 - `status`，已获取的QQ朋友、群列表
@@ -95,7 +101,7 @@ webqqircd是个简单的IRC服务器，可以执行通常的IRC命令，可以�
 ├── Server                   IRC server
 ├── Channel
 │   ├── StandardChannel      `#`开头的IRC channel
-│   ├── StatusChannel        `+status`，查看控制当前QQ会话
+│   ├── StatusChannel        `+qq`，查看控制当前QQ会话
 │   └── QQRoom               QQ群对应的channel，仅该客户端可见
 ├── (User)
 │   ├── Client               IRC客户端连接
