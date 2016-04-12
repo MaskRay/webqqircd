@@ -950,8 +950,9 @@ class QQRoom(Channel):
             return
         sender = self.client.ensure_qq_user(data['sender'], 0)
         if sender:
-            self.client.write(':{} PRIVMSG {} :{}'.format(
-                sender.nick, self.name, msg))
+            for line in msg.splitlines():
+                self.client.write(':{} PRIVMSG {} :{}'.format(
+                    sender.nick, self.name, line))
 
 
 class Client:
