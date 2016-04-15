@@ -7096,13 +7096,17 @@ define("mq.presenter.chat", ["./mq.i18n"], function() {
                     try {
                         var buddylist = modules['mq.model.buddylist'], self = buddylist.getSelfUin()
                         var g = p.send_to || p.from_group
-                        var u = p.sender
-                        if (! u.isSelf)
-                            ws.send({token: token,
-                                    command: 'message',
-                                    room: {gid: g.gid, name: g.name, memo: g.memo, owner: g.owner},
-                                    sender: {uin: u.uin, nick: u.cardName || u.mark || u.nick},
-                                    message: p.content[p.content.length-1]})
+                        var u = p.sender, uin, nick
+                        if (u && u.isSelf) return
+                        if (u)
+                            uin = u.uin, nick = u.cardName || u.mark || u.nick
+                        else
+                            uin = nick = ''+p.sender_uin
+                        ws.send({token: token,
+                                command: 'message',
+                                room: {gid: g.gid, name: g.name, memo: g.memo, owner: g.owner},
+                                sender: {uin: uin, nick: nick},
+                                message: p.content[p.content.length-1]})
                     } catch (ex) {
                         consoleerror(ex.stack)
                     }
