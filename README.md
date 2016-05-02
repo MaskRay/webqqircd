@@ -11,6 +11,7 @@ webqqircd类似于bitlbee，在WebQQ(SmartQQ)和IRC间建起桥梁，可以使�
 - WebQQ不支持发送图片，也无法获悉别人发送了图片
 - 消息发送后不知道成功与否，`mq.model.chat`中`sendMsg(h)`的`onSuccess`为空函数
 - 无法获知群信息变化(如成员变化等)`mq.model.chat`中`addGroup(x)`只判断群存在与否，不判断信息变化
+- 看不到WebQQ会话内新加入的群友的消息
 
 ## 安装
 

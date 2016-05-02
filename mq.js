@@ -7075,11 +7075,14 @@ define("mq.presenter.chat", ["./mq.i18n"], function() {
                 if (token)
                     try {
                         var u = p.from_user
-                        if (! u.isSelf)
-                            ws.send({token: token,
-                                    command: 'message',
-                                    sender: {uin: u.uin, nick: u.cardName || u.mark || u.nick},
-                                    message: p.content[p.content.length-1]})
+                        if (! u.isSelf) {
+                            for (var line of p.content)
+                                if (typeof line === 'string')
+                                    ws.send({token: token,
+                                            command: 'message',
+                                            sender: {uin: u.uin, nick: u.cardName || u.mark || u.nick},
+                                            message: line})
+                        }
                     } catch (ex) {
                         consoleerror(ex.stack)
                     }
