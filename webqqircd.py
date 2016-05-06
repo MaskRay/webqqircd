@@ -648,7 +648,7 @@ class StandardChannel(Channel):
                                      for u, m in self.members.items())))
         client.reply('366 {} {} :End of NAMES list', client.nick, self.name)
 
-    def on_part(self, client, msg):
+    def on_part(self, client, msg=None):
         if client not in self.members:
             client.err_notonchannel(self.name)
             return False
@@ -782,7 +782,7 @@ class StatusChannel(Channel):
         members.append(client.nick)
         client.reply('353 {} = {} :{}', client.nick, self.name, ' '.join(sorted(members)))
 
-    def on_part(self, member, msg):
+    def on_part(self, member, msg=None):
         if isinstance(member, Client):
             if member not in self.members:
                 member.err_notonchannel(self.name)
@@ -910,7 +910,7 @@ class QQRoom(Channel):
                      ' '.join(sorted(members)))
         client.reply('366 {} {} :End of NAMES list', client.nick, self.name)
 
-    def on_part(self, member, msg):
+    def on_part(self, member, msg=None):
         if isinstance(member, Client):
             if not self.joined:
                 member.err_notonchannel(self.name)
