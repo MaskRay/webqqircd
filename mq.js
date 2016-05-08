@@ -7081,7 +7081,7 @@ define("mq.presenter.chat", ["./mq.i18n"], function() {
                                     ws.send({token: token,
                                             command: 'message',
                                             sender: {uin: u.uin, nick: u.cardName || u.mark || u.nick},
-                                            message: line})
+                                            message: line.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/, '&')})
                         }
                     } catch (ex) {
                         consoleerror(ex.stack)
@@ -7105,11 +7105,13 @@ define("mq.presenter.chat", ["./mq.i18n"], function() {
                             uin = u.uin, nick = u.cardName || u.mark || u.nick
                         else
                             uin = nick = ''+p.sender_uin
-                        ws.send({token: token,
-                                command: 'message',
-                                room: {gid: g.gid, name: g.name, memo: g.memo, owner: g.owner},
-                                sender: {uin: uin, nick: nick},
-                                message: p.content[p.content.length-1]})
+                        for (var line of p.content)
+                            if (typeof line === 'string')
+                                ws.send({token: token,
+                                        command: 'message',
+                                        room: {gid: g.gid, name: g.name, memo: g.memo, owner: g.owner},
+                                        sender: {uin: uin, nick: nick},
+                                        message: line.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/, '&')})
                     } catch (ex) {
                         consoleerror(ex.stack)
                     }
