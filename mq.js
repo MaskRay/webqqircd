@@ -47,7 +47,6 @@ var ws = new MyWebSocket('wss://127.0.0.1:9002')
 var consolelog = console.log.bind(console)
 var consoleerror = console.error.bind(console)
 var modules = {}
-var token = '111'
 var deliveredContact = new Map()
 var deliveredRoomContact = new Map()
 var webqq_chat
@@ -59,36 +58,35 @@ function webqqircd_reset() {
 
 // 同步通讯录
 setInterval(() => {
-    if (token)
-        try {
-            var buddylist = modules['mq.model.buddylist'], self = buddylist.getSelfUin()
-            for (var x of buddylist.getFriends()) {
-                var nick = x.mark || x.nick
-                if (x.uin != self && ! x.isStrange && (! deliveredContact.has(x.uin) || deliveredContact.get(x.uin) != nick)) {
-                    ws.send({token: token, command: 'friend', record: {uin: x.uin, nick: nick}})
-                    deliveredContact.set(x.uin, nick)
-                }
+    try {
+        var buddylist = modules['mq.model.buddylist'], self = buddylist.getSelfUin()
+        for (var x of buddylist.getFriends()) {
+            var nick = x.mark || x.nick
+            if (x.uin != self && ! x.isStrange && (! deliveredContact.has(x.uin) || deliveredContact.get(x.uin) != nick)) {
+                ws.send({command: 'friend', record: {uin: x.uin, nick: nick}})
+                deliveredContact.set(x.uin, nick)
             }
-            var rooms = Object.assign({}, buddylist.getGroups(), buddylist.getDiscuss())
-            for (var gid in rooms) {
-                gid = +gid
-                var x = rooms[gid], name = x.name, info = JSON.stringify(x)
-                if (! deliveredRoomContact.has(gid) || deliveredRoomContact.get(gid) != info) {
-                    var members = []
-                    if (x.members)
-                        for (var y of x.members) {
-                            if (y.uin == self) continue
-                            y = Object.assign({}, y)
-                            y.nick = y.cardName || y.nick
-                            members.push(y)
-                        }
-                    ws.send({token: token, command: 'room', record: {gid: gid, name: name, memo: x.memo, members: members}})
-                    deliveredRoomContact.set(gid, info)
-                }
-            }
-        } catch (ex) {
-            consoleerror(ex.stack)
         }
+        var rooms = Object.assign({}, buddylist.getGroups(), buddylist.getDiscuss())
+        for (var gid in rooms) {
+            gid = +gid
+            var x = rooms[gid], name = x.name, info = JSON.stringify(x)
+            if (! deliveredRoomContact.has(gid) || deliveredRoomContact.get(gid) != info) {
+                var members = []
+                if (x.members)
+                    for (var y of x.members) {
+                        if (y.uin == self) continue
+                        y = Object.assign({}, y)
+                        y.nick = y.cardName || y.nick
+                        members.push(y)
+                    }
+                ws.send({command: 'room', record: {gid: gid, name: name, memo: x.memo, members: members}})
+                deliveredRoomContact.set(gid, info)
+            }
+        }
+    } catch (ex) {
+        consoleerror(ex.stack)
+    }
 }, 3000)
 
 ws.onopen = webqqircd_reset
@@ -97,6 +95,10 @@ ws.onmessage = data => {
     try {
         data = JSON.parse(data.detail)
         switch (data.command) {
+        case 'close':
+            ws.close()
+            ws.open(false)
+            break
         case 'send_text_message':
             var buddylist = modules['mq.model.buddylist']
             if (buddylist.getFriendByUin(data.receiver))
@@ -7072,20 +7074,18 @@ define("mq.presenter.chat", ["./mq.i18n"], function() {
                     f.appendMessage([p])
 
                 //@ PATCH
-                if (token)
-                    try {
-                        var u = p.from_user
-                        if (! u.isSelf) {
-                            for (var line of p.content)
-                                if (typeof line === 'string')
-                                    ws.send({token: token,
-                                            command: 'message',
-                                            sender: {uin: u.uin, nick: u.cardName || u.mark || u.nick},
-                                            message: line.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/, '&')})
-                        }
-                    } catch (ex) {
-                        consoleerror(ex.stack)
+                try {
+                    var u = p.from_user
+                    if (! u.isSelf) {
+                        for (var line of p.content)
+                            if (typeof line === 'string')
+                                ws.send({command: 'message',
+                                        sender: {uin: u.uin, nick: u.cardName || u.mark || u.nick},
+                                        message: line.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/, '&')})
                     }
+                } catch (ex) {
+                    consoleerror(ex.stack)
+                }
             },
             onGroupMessageReceived: function(p) {
                 var y = p.from_group
@@ -7095,26 +7095,24 @@ define("mq.presenter.chat", ["./mq.i18n"], function() {
                     f.appendMessage([p])
 
                 //@ PATCH
-                if (token)
-                    try {
-                        var buddylist = modules['mq.model.buddylist'], self = buddylist.getSelfUin()
-                        var g = p.send_to || p.from_group
-                        var u = p.sender, uin, nick
-                        if (u && u.isSelf) return
-                        if (u)
-                            uin = u.uin, nick = u.cardName || u.mark || u.nick
-                        else
-                            uin = nick = ''+p.sender_uin
-                        for (var line of p.content)
-                            if (typeof line === 'string')
-                                ws.send({token: token,
-                                        command: 'message',
-                                        room: {gid: g.gid, name: g.name, memo: g.memo, owner: g.owner},
-                                        sender: {uin: uin, nick: nick},
-                                        message: line.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/, '&')})
-                    } catch (ex) {
-                        consoleerror(ex.stack)
-                    }
+                try {
+                    var buddylist = modules['mq.model.buddylist'], self = buddylist.getSelfUin()
+                    var g = p.send_to || p.from_group
+                    var u = p.sender, uin, nick
+                    if (u && u.isSelf) return
+                    if (u)
+                        uin = u.uin, nick = u.cardName || u.mark || u.nick
+                    else
+                        uin = nick = ''+p.sender_uin
+                    for (var line of p.content)
+                        if (typeof line === 'string')
+                            ws.send({command: 'message',
+                                    room: {gid: g.gid, name: g.name, memo: g.memo, owner: g.owner},
+                                    sender: {uin: uin, nick: nick},
+                                    message: line.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/, '&')})
+                } catch (ex) {
+                    consoleerror(ex.stack)
+                }
             },
             onDiscussMessageReceived: function(p) {
                 var y = p.from_discuss
@@ -7123,20 +7121,18 @@ define("mq.presenter.chat", ["./mq.i18n"], function() {
                     f.appendMessage([p])
 
                 //@ PATCH TODO
-                if (token)
-                    try {
-                        var buddylist = modules['mq.model.buddylist'], self = buddylist.getSelfUin()
-                        var g = p.send_to || p.from_discuss
-                        var u = p.sender
-                        if (! u.isSelf)
-                            ws.send({token: token,
-                                    command: 'message',
-                                    room: {gid: g.gid, name: g.name, memo: g.memo, owner: g.owner},
-                                    sender: {uin: u.uin, nick: u.cardName || u.mark || u.nick},
-                                    message: p.content[p.content.length-1]})
-                    } catch (ex) {
-                        consoleerror(ex.stack)
-                    }
+                try {
+                    var buddylist = modules['mq.model.buddylist'], self = buddylist.getSelfUin()
+                    var g = p.send_to || p.from_discuss
+                    var u = p.sender
+                    if (! u.isSelf)
+                        ws.send({command: 'message',
+                                room: {gid: g.gid, name: g.name, memo: g.memo, owner: g.owner},
+                                sender: {uin: u.uin, nick: u.cardName || u.mark || u.nick},
+                                message: p.content[p.content.length-1]})
+                } catch (ex) {
+                    consoleerror(ex.stack)
+                }
             },
             onLoginSuccess: function(p) {
                 r = p.selfUin
