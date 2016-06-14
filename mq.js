@@ -7081,7 +7081,7 @@ define("mq.presenter.chat", ["./mq.i18n"], function() {
                             if (typeof line === 'string')
                                 ws.send({command: 'message',
                                         sender: {uin: u.uin, nick: u.cardName || u.mark || u.nick},
-                                        message: line.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/, '&')})
+                                        message: line.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')})
                     }
                 } catch (ex) {
                     consoleerror(ex.stack)

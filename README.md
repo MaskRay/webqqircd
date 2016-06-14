@@ -19,7 +19,27 @@ webqqircd类似于bitlbee，在WebQQ(SmartQQ)和IRC间建起桥梁，可以使�
 需要Python 3.5或以上，支持`async/await`语法
 `pip install -r requirements.txt`安装依赖
 
-Arch Linux可以安装<https://aur.archlinux.org/packages/webqqircd-git>，会自动在`/etc/webqqircd/`下生成自签名证书(见下文)，导入浏览器即可。
+### Arch Linux
+
+安装<https://aur.archlinux.org/packages/wechatircd-git>，会自动在`/etc/wechatircd/`下生成自签名证书(见下文)，导入浏览器即可。
+
+### 其他发行版
+
+- `openssl req -newkey rsa:2048 -nodes -keyout a.key -x509 -out a.crt -subj '/CN=127.0.0.1' -dates 9999`创建密钥与证书。
+- 把证书导入浏览器，见下文
+- `./webqqircd.py --tls-cert a.crt --tls-key a.key`，会监听127.1:6668的IRC和127.1:9002的HTTPS与WebSocket over TLS
+
+### 浏览器设置
+
+Chrome/Chromium
+
+- 访问`chrome://settings/certificates`，导入a.crt，在Authorities标签页选择该证书，Edit->Trust this certificate for identifying websites.
+- 安装Switcheroo Redirector扩展，把<http://pub.idqqimg.com/smartqq/js/mq.js?t=20151207>重定向至<https://127.0.0.1:9002/mq.js>。
+
+Firefox
+
+- 安装Redirector扩展，重定向js，设置` Applies to: Main window (address bar), Scripts`。
+- 访问重定向后的js URL，报告Your connection is not secure，Advanced->Add Exception->Confirm Security Exception
 
 ## 运行
 

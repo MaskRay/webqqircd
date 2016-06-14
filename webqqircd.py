@@ -126,54 +126,6 @@ class Web(object):
             except:
                 pass
 
-    def add_friend(self, token, uin, message):
-        if token in self.token2ws:
-            ws = self.token2ws[token]
-            try:
-                ws.send_str(json.dumps({
-                    'command': 'add_friend',
-                    'user': uin,
-                    'message': message,
-                }))
-            except:
-                pass
-
-    def add_member(self, token, gid, uin):
-        if token in self.token2ws:
-            ws = self.token2ws[token]
-            try:
-                ws.send_str(json.dumps({
-                    'command': 'add_member',
-                    'room': gid,
-                    'user': uin,
-                }))
-            except:
-                pass
-
-    def del_member(self, token, gid, uin):
-        if token in self.token2ws:
-            ws = self.token2ws[token]
-            try:
-                ws.send_str(json.dumps({
-                    'command': 'del_member',
-                    'room': gid,
-                    'user': uin,
-                }))
-            except:
-                pass
-
-    def mod_topic(self, token, gid, topic):
-        if token in self.token2ws:
-            ws = self.token2ws[token]
-            try:
-                ws.send_str(json.dumps({
-                    'command': 'mod_topic',
-                    'room': gid,
-                    'topic': topic,
-                }))
-            except:
-                pass
-
 ### IRC utilities
 
 def irc_lower(s):
@@ -362,10 +314,7 @@ class RegisteredCommands:
 
     @staticmethod
     def summon(client, nick, msg):
-        if client.has_qq_user(nick):
-            Web.instance.add_friend(client.get_qq_user(nick).uin, msg)
-        else:
-            client.err_nologin(nick)
+        client.err_nologin(nick)
 
     @staticmethod
     def time(client):
@@ -780,7 +729,7 @@ class QQRoom(Channel):
 
     def update(self, client, record):
         self.record.update(record)
-        self.topic = self.record.get('memo', '')
+        self.topic = self.record.get('memo', '').replace('\n', '\\n')
         old_name = getattr(self, 'name', None)
         base = '&' + irc_escape(self.record.get('name'))
         if base == '&':
@@ -856,13 +805,6 @@ class QQRoom(Channel):
             self.join_event(member)
         return True
 
-    def on_kick(self, client, nick, reason):
-        if client.has_qq_user(nick):
-            user = client.get_qq_user(nick)
-            Web.instance.del_member(self.gid, user.uin)
-        else:
-            client.err_usernotinchannel(nick, self.name)
-
     def on_names(self, client):
         members = ['@'+u.nick if u == self.owner else u.nick
                    for u in self.members]
@@ -889,10 +831,7 @@ class QQRoom(Channel):
 
     def on_topic(self, client, new=None):
         if new:
-            if True:  # TODO is owner
-                Web.instance.mod_topic(self.gid, new)
-            else:
-                client.err_nochanmodes()
+            client.err_nochanmodes()
         else:
             super().on_topic(client, new)
 
@@ -1280,8 +1219,9 @@ class QQUser:
 
     def on_websocket_message(self, data):
         msg = data['message']
-        self.client.write(':{} PRIVMSG {} :{}'.format(
-            self.prefix, self.client.nick, msg))
+        for line in msg.splitlines():
+            self.client.write(':{} PRIVMSG {} :{}'.format(
+                self.prefix, self.client.nick, line))
 
 
 class Server:
