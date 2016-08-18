@@ -741,7 +741,7 @@ class QQRoom(Channel):
         suffix = ''
         while 1:
             name = base+suffix
-            if name == old_name or not client.is_in_channel(base+suffix):
+            if name == old_name or not client.server.has_channel(base+suffix):
                 break
             suffix = str(int(suffix or 0)+1)
         if name != old_name:
