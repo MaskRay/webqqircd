@@ -7127,9 +7127,9 @@ define("mq.presenter.chat", ["./mq.i18n"], function() {
                     var u = p.sender
                     if (! u.isSelf)
                         ws.send({command: 'message',
-                                room: {gid: g.gid, name: g.name, memo: g.memo, owner: g.owner},
+                                room: {gid: g.did, name: g.name, memo: g.memo},
                                 sender: {uin: u.uin, nick: u.cardName || u.mark || u.nick},
-                                message: p.content[p.content.length-1]})
+                                message: p.content[p.content.length-1].replace(/&gt;/g, '>').replace(/&amp;/, '&')})
                 } catch (ex) {
                     consoleerror(ex.stack)
                 }
