@@ -7,6 +7,7 @@ import aiohttp, asyncio, inspect, json, logging.handlers, os, pprint, random, re
     signal, socket, ssl, string, sys, time, traceback, uuid, weakref
 
 logger = logging.getLogger('webqqircd')
+im_name = 'QQ'
 
 
 def debug(msg, *args):
@@ -35,7 +36,7 @@ class ExceptionHook(object):
         return self.instance(*args, **kwargs)
 
 
-### HTTP serving mq.js & WebSocket server
+### HTTP serving js & WebSocket server
 
 class Web(object):
     instance = None
@@ -46,7 +47,7 @@ class Web(object):
         assert not Web.instance
         Web.instance = self
 
-    async def handle_mq_js(self, request):
+    async def handle_app_js(self, request):
         with open(os.path.join(self.http_root, 'mq.js'), 'rb') as f:
             return web.Response(body=f.read(),
                                 headers={'Content-Type': 'application/javascript; charset=UTF-8',
@@ -85,7 +86,7 @@ class Web(object):
         self.app = aiohttp.web.Application()
         self.app.router.add_route('GET', '/', self.handle_web_socket)
         self.app.router.add_route(
-            'GET', '/mq.js', self.handle_mq_js)
+            'GET', '/mq.js', self.handle_app_js)
         self.handler = self.app.make_handler()
         self.srv = []
         for i in listens:
@@ -172,10 +173,10 @@ class RegisteredCommands:
     @staticmethod
     def info(client):
         client.rpl_info('{} users', len(client.server.nicks))
-        client.rpl_info('{} QQ users', len(client.uin2qq_user))
-        client.rpl_info('{} QQ friends',
-                        len(StatusChannel.instance.shadow_members.get(client, ())))
-        client.rpl_info('{} QQ rooms', len(client.gid2qq_room))
+        client.rpl_info('{} {} users', im_name, len(client.nick2special_user))
+        client.rpl_info('{} {} friends', im_name,
+                        len(StatusChannel.instance.shadow_members.get(client, {})))
+        client.rpl_info('{} {} rooms', im_name, len(client.name2special_room))
 
     @staticmethod
     def invite(client, nick, channelname):
@@ -188,7 +189,7 @@ class RegisteredCommands:
     def ison(client, *nicks):
         client.reply('303 {} :{}', client.nick,
                      ' '.join(nick for nick in nicks
-                              if client.has_qq_user(nick) or
+                              if client.has_special_user(nick) or
                               client.server.has_nick(nick)))
 
     @staticmethod
@@ -199,8 +200,8 @@ class RegisteredCommands:
                 channel.on_part(client, channel.name)
         else:
             for channelname in arg.split(','):
-                if client.has_qq_room(channelname):
-                    client.get_qq_room(channelname).on_join(client)
+                if client.has_special_room(channelname):
+                    client.get_special_room(channelname).on_join(client)
                 else:
                     try:
                         client.server.ensure_channel(channelname).on_join(client)
@@ -220,10 +221,10 @@ class RegisteredCommands:
             channels = [client.get_channel(channelname)
                         for channelname in arg.split(',')
                         if client.has_channel(channelname) or
-                        client.has_qq_room(channelname)]
+                        client.has_special_room(channelname)]
         else:
             channels = set(client.channels.values())
-            for channel in client.gid2qq_room.values():
+            for channel in client.name2special_room.values():
                 channels.add(channel)
             channels = list(channels)
         channels.sort(key=lambda ch: ch.name)
@@ -234,14 +235,15 @@ class RegisteredCommands:
 
     @staticmethod
     def lusers(client):
-        client.reply('251 :There are {} users and {} QQ users (local to you) on 1 server',
+        client.reply('251 :There are {} users and {} {} users (local to you) on 1 server',
                      len(client.server.nicks),
-                     len(client.uin2qq_user)
+                     len(client.nick2special_user),
+                     im_name
                      )
 
     @staticmethod
     def mode(client, target, *args):
-        if client.has_qq_user(target):
+        if client.has_special_user(target):
             if args:
                 client.err_umodeunknownflag()
             else:
@@ -252,8 +254,8 @@ class RegisteredCommands:
             else:
                 client2 = client.server.get_nick(target)
                 client.rpl_umodeis(client2.mode)
-        elif client.has_qq_room(target):
-            client.get_qq_room(target).on_mode(client)
+        elif client.has_special_room(target):
+            client.get_special_room(target).on_mode(client)
         elif client.server.has_channel(target):
             client.server.get_channel(target).on_mode(client)
         else:
@@ -333,8 +335,8 @@ class RegisteredCommands:
 
     @staticmethod
     def who(client, target):
-        if client.has_qq_user(target):
-            client.get_qq_user(target).on_who_member(
+        if client.has_special_user(target):
+            client.get_special_user(target).on_who_member(
                 client, StatusChannel.instance.name)
         elif client.server.has_nick(target):
             client.server.get_nick(target).on_who_member(
@@ -352,8 +354,8 @@ class RegisteredCommands:
             target = args[0]
         else:
             target = args[1]
-        if client.has_qq_user(target):
-            client.get_qq_user(target).on_whois(client)
+        if client.has_special_user(target):
+            client.get_special_user(target).on_whois(client)
         elif client.server.has_nick(target):
             client.server.get_nick(target).on_whois(client)
         else:
@@ -371,9 +373,9 @@ class RegisteredCommands:
             return
         target = args[0]
         msg = args[1]
-        # on name conflict, prefer to resolve QQ user first
-        if client.has_qq_user(target):
-            user = client.get_qq_user(target)
+        # on name conflict, prefer to resolve special user first
+        if client.has_special_user(target):
+            user = client.get_special_user(target)
             if user.is_friend:
                 user.on_notice_or_privmsg(client, command, msg)
             elif command == 'PRIVMSG':
@@ -383,7 +385,7 @@ class RegisteredCommands:
             client2 = client.server.get_nick(target)
             client2.write(':{} {} {} :{}'.format(
                 client.prefix, 'PRIVMSG', target, msg))
-        # IRC channel or QQ chatroom
+        # IRC channel or special chatroom
         elif client.is_in_channel(target):
             client.get_channel(target).on_notice_or_privmsg(
                 client, command, msg)
@@ -391,57 +393,46 @@ class RegisteredCommands:
             client.err_nosuchnick(target)
 
 
-class QQCommands:
-    @staticmethod
-    def add_friend_ack(client, data):
-        nick = client.uin2qq_user[data['user']].nick
-        client.reply('342 {} {} :Summoning user to IRC', client.nick, nick)
-
-    @staticmethod
-    def add_friend_nak(client, data):
-        nick = client.uin2qq_user[data['user']].nick
-        client.status('Friend request to {} failed'.format(nick))
-
+class SpecialCommands:
     @staticmethod
     def friend(client, data):
-        debug({k: v for k, v in data['record'].items() if k in ['uin', 'nick']})
-        client.ensure_qq_user(data['record'], 1)
-
-    @staticmethod
-    def room_contact(client, data):
-        debug({k: v for k, v in data['record'].items() if k in ['uin', 'nick']})
-        client.ensure_qq_user(data['record'], -1)
-
-    @staticmethod
-    def room(client, data):
-        debug({k: v for k, v in data['record'].items() if k in ['gid', 'name']})
         record = data['record']
-        room = client.ensure_qq_room(record)
-        if isinstance(record.get('members'), list):
-            room.update_members(client, record['members'])
+        debug('friend: ' + ', '.join([k + ':' + repr(record.get(k)) for k in ['uin', 'nick']]))
+        client.ensure_special_user(record, 1)
 
     @staticmethod
     def message(client, data):
-        # receiver is a QQ group/discuss
-        if data.get('room'):
-            client.ensure_qq_room(data['room']) \
-                .on_websocket_message(data)
-        # receiver is a QQ user
-        else:
-            user = client.ensure_qq_user(data['sender'], 0)
-            if user:
-                user.on_websocket_message(data)
+        client.ensure_special_user(data['receiver']).on_websocket_message(data)
+    def room_contact(client, data):
+        record = data['record']
+        debug('room_contact: ' + ', '.join([k + ':' + repr(record.get(k)) for k in ['uin', 'nick']]))
+        client.ensure_special_user(record, -1)
+
+    @staticmethod
+    def room(client, data):
+        record = data['record']
+        debug('room: ' + ', '.join([k + ':' + repr(record.get(k)) for k in ['gid', 'name', 'memo', 'owner']]))
+        client.ensure_special_room(record).update_detail(record)
+
+    @staticmethod
+    def room_message(client, data):
+        client.ensure_special_room(data['receiver']).on_websocket_message(data)
+
+    @staticmethod
+    def self(client, data):
+        debug('self: %r', data)
+        client.uin = data['uin']
 
     @staticmethod
     def send_file_message_nak(client, data):
         receiver = data['receiver']
         filename = data['filename']
-        if client.has_qq_room(receiver):
-            room = client.get_qq_room(receiver)
+        if client.has_special_room(receiver):
+            room = client.get_special_room(receiver)
             client.write(':{} PRIVMSG {} :[文件发送失败] {}'.format(
                 client.prefix, room.nick, filename))
-        elif client.has_qq_user(receiver):
-            user = client.get_qq_user(receiver)
+        elif client.has_special_user(receiver):
+            user = client.get_special_user(receiver)
             client.write(':{} PRIVMSG {} :[文件发送失败] {}'.format(
                 client.prefix, user.nick, filename))
 
@@ -451,22 +442,23 @@ class QQCommands:
         print(data)
         receiver = data['receiver']
         msg = data['message']
-        if client.has_qq_room(receiver):
-            room = client.get_qq_room(receiver)
+        if client.has_special_room(receiver):
+            room = client.get_special_room(receiver)
             client.write(':{} PRIVMSG {} :[文字发送失败] {}'.format(
                 client.prefix, room.nick, msg))
-        elif client.has_qq_user(receiver):
-            user = client.get_qq_user(receiver)
+        elif client.has_special_user(receiver):
+            user = client.get_special_user(receiver)
             client.write(':{} PRIVMSG {} :[文字发送失败] {}'.format(
                 client.prefix, user.nick, msg))
 
-### Channels: StandardChannel, StatusChannel, QQRoom
+### Channels: StandardChannel, StatusChannel, SpecialChannel
 
 class Channel:
     def __init__(self, name):
         self.name = name
         self.topic = ''
         self.mode = 'n'
+        self.members = {}
 
     @property
     def prefix(self):
@@ -479,7 +471,7 @@ class Channel:
         raise NotImplemented
 
     def n_members(self, client):
-        raise NotImplemented
+        return len(self.members)
 
     def event(self, source, command, fmt, *args, include_source=True):
         line = fmt.format(*args) if args else fmt
@@ -487,8 +479,17 @@ class Channel:
             if client != source or include_source:
                 client.write(':{} {} {}'.format(source.prefix, command, line))
 
-    def deop_event(self, channel, user):
-        self.event(channel, 'MODE', '{} -o {}', channel.name, user.nick)
+    def dehalfop_event(self, user):
+        self.event(self, 'MODE', '{} -h {}', self.name, user.nick)
+
+    def deop_event(self, user):
+        self.event(self, 'MODE', '{} -o {}', self.name, user.nick)
+
+    def devoice_event(self, user):
+        self.event(self, 'MODE', '{} -v {}', self.name, user.nick)
+
+    def halfop_event(self, user):
+        self.event(self, 'MODE', '{} +h {}', self.name, user.nick)
 
     def nick_event(self, user, new):
         self.event(user, 'NICK', new)
@@ -503,14 +504,17 @@ class Channel:
             self.event(kicker, 'KICK', '{} {}', channel.name, kicked.nick)
         self.log(kicker, 'kicked %s', kicked.prefix)
 
-    def op_event(self, channel, user):
-        self.event(channel, 'MODE', '{} +o {}', channel.name, user.nick)
+    def op_event(self, user):
+        self.event(self, 'MODE', '{} +o {}', self.name, user.nick)
 
     def part_event(self, user, partmsg):
         if partmsg:
             self.event(user, 'PART', '{} :{}', self.name, partmsg)
         else:
             self.event(user, 'PART', self.name)
+
+    def voice_event(self, user):
+        self.event(user, 'MODE', '{} +v {}', self.name, user.nick)
 
     def on_invite(self, client, nick):
         # TODO
@@ -529,6 +533,20 @@ class Channel:
     def on_mode(self, client):
         client.rpl_channelmodeis(self.name, self.mode)
 
+    def on_names(self, client):
+        members = []
+        for u, mode in self.members.items():
+            nick = u.nick
+            if 'o' in mode:
+                nick = '@'+nick
+            elif 'v' in mode:
+                nick = '+'+nick
+            members.append(nick)
+        if members:
+            client.reply('353 {} = {} :{}', client.nick, self.name,
+                         ' '.join(sorted(members)))
+        client.reply('366 {} {} :End of NAMES list', client.nick, self.name)
+
     def on_topic(self, client, new=None):
         if new:
             client.err_nochanmodes(self.name)
@@ -543,13 +561,9 @@ class StandardChannel(Channel):
     def __init__(self, server, name):
         super().__init__(name)
         self.server = server
-        self.members = {}   # Client -> mode
 
     def multicast_group(self, source):
         return self.members.keys()
-
-    def n_members(self, client):
-        return len(self.members)
 
     def on_notice_or_privmsg(self, client, command, msg):
         self.event(client, command, '{} :{}', self.name, msg, include_source=False)
@@ -574,12 +588,6 @@ class StandardChannel(Channel):
             elif client != user:
                 self.kick_event(client, self, user, reason)
                 self.on_part(user, None)
-
-    def on_names(self, client):
-        client.reply('353 {} = {} :{}', client.nick, self.name,
-                     ' '.join(sorted('@'+u.nick if 'o' in m else u.nick
-                                     for u, m in self.members.items())))
-        client.reply('366 {} {} :End of NAMES list', client.nick, self.name)
 
     def on_part(self, client, msg=None):
         if client not in self.members:
@@ -616,20 +624,19 @@ class StatusChannel(Channel):
     def __init__(self, server):
         super().__init__('+qq')
         self.server = server
-        self.topic = "Your QQ friends are listed here. Messages wont't be broadcasted to them. Type 'help' to see available commands"
-        self.members = set()
+        self.topic = "Your friends are listed here. Messages wont't be broadcasted to them. Type 'help' to see available commands"
         self.shadow_members = weakref.WeakKeyDictionary()
         assert not StatusChannel.instance
         StatusChannel.instance = self
 
     def multicast_group(self, source):
         client = source.client \
-            if isinstance(source, (QQUser, QQRoom)) \
+            if isinstance(source, (SpecialUser, SpecialChannel)) \
             else source
         return (client,) if client in self.members else ()
 
     def n_members(self, client):
-        return len(self.shadow_members.get(client, ())) + \
+        return len(self.shadow_members.get(client, {})) + \
             (1 if client in self.members else 0)
 
     def respond(self, client, fmt, *args):
@@ -643,25 +650,56 @@ class StatusChannel(Channel):
             client.err_notonchannel(self.name)
             return
         if msg == 'help':
-            self.respond(client, 'help            display this help')
-            self.respond(client, 'eval [password] eval')
-            self.respond(client, 'status          channels and users')
-        elif msg == 'status':
+            self.respond(client, 'help')
+            self.respond(client, '    display this help')
+            self.respond(client, 'eval [password] expression')
+            self.respond(client, '    eval python expression')
+            self.respond(client, 'status [pattern]')
+            self.respond(client, '    show status for user, channel and wechat rooms')
+            self.respond(client, 'reload_friend $name')
+            self.respond(client, '    reload friend info in case of no such nick/channel in privmsg, and use __all__ as name if you want to reload all')
+        elif msg.startswith('status'):
+            pattern = None
+            ary = msg.split(' ', 1)
+            if len(ary) > 1:
+                pattern = ary[1]
             self.respond(client, 'IRC channels:')
             for name, room in client.channels.items():
+                if pattern is not None and pattern not in name: continue
                 if isinstance(room, StandardChannel):
-                    self.respond(client, name)
-            self.respond(client, 'QQ friends:')
-            for name, user in client.nick2qq_user.items():
+                    self.respond(client, '    ' + name)
+            self.respond(client, '{} Friends:', im_name)
+            for name, user in client.nick2special_user.items():
                 if user.is_friend:
-                    line = name+':'
-                    if user.is_friend:
-                        line += ' friend'
-                    self.respond(client, line)
-            self.respond(client, 'QQ rooms:')
+                    if pattern is not None and not (pattern in name or pattern in user.record.get('DisplayName', '') or pattern in user.record.get('NickName','')): continue
+                    line = name + ': friend ('
+                    line += ', '.join([k + ':' + repr(v) for k, v in user.record.items() if k in ['DisplayName', 'NickName']])
+                    line += ')'
+                    self.respond(client, '    ' + line)
+            self.respond(client, '{} Rooms:', im_name)
             for name, room in client.channels.items():
-                if isinstance(room, QQRoom):
-                    self.respond(client, name)
+                if pattern is not None and pattern not in name: continue
+                if isinstance(room, SpecialChannel):
+                    self.respond(client, '    ' + name)
+        elif msg.startswith('reload_friend'):
+            who = None
+            ary = msg.split(' ', 1)
+            if len(ary) > 1:
+                who = ary[1]
+            if not who:
+                self.respond(client, 'reload_friend <name>')
+            else:
+                Web.instance.reload_friend(who)
+        elif msg.startswith('web_eval'):
+            expr = None
+            ary = msg.split(' ', 1)
+            if len(ary) > 1:
+                expr = ary[1]
+            if not expr:
+                self.respond(client, 'None')
+            else:
+                Web.instance.web_eval(expr)
+                self.respond(client, 'expr sent, please use debug log to view eval result')
         else:
             m = re.match(r'eval (\S+) (.+)$', msg.strip())
             if m and m.group(1) == client.server.options.password:
@@ -678,23 +716,32 @@ class StatusChannel(Channel):
         if isinstance(member, Client):
             if member in self.members:
                 return False
-            self.members.add(member)
+            self.members[member] = ''
             super().on_join(member)
         else:
             client = member.client
             if client not in self.shadow_members:
-                self.shadow_members[client] = set()
+                self.shadow_members[client] = {}
             if member in self.shadow_members[client]:
                 return False
-            self.shadow_members[client].add(member)
             member.enter(self)
             self.join_event(member)
+            self.shadow_members[client][member] = ''
         return True
 
     def on_names(self, client):
-        members = [x.nick for x in self.shadow_members.get(client, ())]
-        members.append(client.nick)
+        members = []
+        if client in self.members:
+            members.append(client.nick)
+        for u, mode in self.shadow_members.get(client, {}).items():
+            nick = u.nick
+            if 'o' in mode:
+                nick = '@'+nick
+            elif 'v' in mode:
+                nick = '+'+nick
+            members.append(nick)
         client.reply('353 {} = {} :{}', client.nick, self.name, ' '.join(sorted(members)))
+        client.reply('366 {} {} :End of NAMES list', client.nick, self.name)
 
     def on_part(self, member, msg=None):
         if isinstance(member, Client):
@@ -703,7 +750,7 @@ class StatusChannel(Channel):
                 return False
             if msg:  # explicit PART, not disconnection
                 self.part_event(member, msg)
-            self.members.remove(member)
+            del self.members[member]
         else:
             if member not in self.shadow_members.get(member.client, ()):
                 return False
@@ -717,7 +764,7 @@ class StatusChannel(Channel):
             client.on_who_member(client, self.name)
 
 
-class QQRoom(Channel):
+class SpecialChannel(Channel):
     def __init__(self, client, record):
         super().__init__(None)
         self.client = client
@@ -725,10 +772,6 @@ class QQRoom(Channel):
         self.record = {}
         self.idle = True      # no messages yet
         self.joined = False   # `client` has not joined
-        # to be 0, so the owner is hard to determine.
-        # If the owner is determined, he/she is the only op
-        self.owner = None
-        self.members = set()  # room members excluding `client`, used only for listing
         self.update(client, record)
 
     def update(self, client, record):
@@ -753,40 +796,46 @@ class QQRoom(Channel):
             if joined:
                 self.on_join(client)
 
-    def update_members(self, client, members):
-        owner_uin = self.record.get('owner', 0)
-        owner = None
-        seen = set()
-        for member in members:
-            user = client.ensure_qq_user(member, 0)
-            if user:
-                seen.add(user)
-                if owner_uin == user.uin:
-                    owner = user
-                if user not in self.members:
+    def update_detail(self, record):
+        if isinstance(record.get('members'), list):
+            owner_uin = record.get('owner', 0)
+            seen = {self.client: ''}
+            for member in record['members']:
+                user = self.client.ensure_special_user(member)
+                if user is not self.client:
+                    if owner_uin == user.uin:
+                        seen[user] = 'o'
+                    elif user.is_friend:
+                        seen[user] = 'v'
+                    else:
+                        seen[user] = ''
+            for user in self.members.keys() - seen.keys():
+                self.on_part(user, self.name)
+            for user in seen.keys() - self.members.keys():
+                if user is not self.client:
                     self.on_join(user)
-            elif owner_uin == client.uin:
-                owner = client
-        for user in self.members - seen:
-            self.on_part(user, self.name)
-        self.members = seen
-        if self.owner != owner:
-            # deop the old owner
-            if self.owner:
-                self.deop_event(self, self.owner)
-            self.owner = owner
-            if owner:
-                self.op_event(self, owner)
+            for user, mode in seen.items():
+                old = self.members.get(user, '')
+                if 'h' in old and 'h' not in mode:
+                    self.dehalfop_event(user)
+                if 'h' not in old and 'h' in mode:
+                    self.halfop_event(user)
+                if 'o' in old and 'o' not in mode:
+                    self.deop_event(user)
+                if 'o' not in old and 'o' in mode:
+                    self.op_event(user)
+                if 'v' in old and 'v' not in mode:
+                    self.devoice_event(user)
+                if 'v' not in old and 'v' in mode:
+                    self.voice_event(user)
+            self.members = seen
 
     def multicast_group(self, source):
         if not self.joined:
             return ()
-        if isinstance(source, (QQUser, QQRoom)):
+        if isinstance(source, (SpecialUser, SpecialChannel)):
             return (source.client,)
         return (source,)
-
-    def n_members(self, client):
-        return len(self.members) + (1 if self.joined else 0)
 
     def on_notice_or_privmsg(self, client, command, msg):
         Web.instance.send_text_message(self.gid, msg)
@@ -804,18 +853,14 @@ class QQRoom(Channel):
         else:
             if member in self.members:
                 return False
-            self.members.add(member)
+            self.members[member] = ''
             member.enter(self)
             self.join_event(member)
         return True
 
-    def on_names(self, client):
-        members = ['@'+u.nick if u == self.owner else u.nick
-                   for u in self.members]
-        members.append('@'+client.nick if client == self.owner else client.nick)
-        client.reply('353 {} = {} :{}', client.nick, self.name,
-                     ' '.join(sorted(members)))
-        client.reply('366 {} {} :End of NAMES list', client.nick, self.name)
+    def on_kick(self, client, nick, reason):
+        # Not supported
+        client.err_chanoprivsneeded(self.name)
 
     def on_part(self, member, msg=None):
         if isinstance(member, Client):
@@ -829,7 +874,7 @@ class QQRoom(Channel):
             if member not in self.members:
                 return False
             self.part_event(member, msg)
-            self.members.remove(member)
+            del self.members[member]
         member.leave(self)
         return True
 
@@ -852,18 +897,22 @@ class QQRoom(Channel):
                 self.client.auto_join(self)
         if not self.joined:
             return
-        sender = self.client.ensure_qq_user(data['sender'], 0)
-        if sender:
-            for line in msg.splitlines():
-                self.client.write(':{} PRIVMSG {} :{}'.format(
-                    sender.nick, self.name, line))
+        sender = self.client.ensure_special_user(data['sender'])
+        if not sender:
+            return
+        if sender not in self.members:
+            self.on_join(sender)
+        for line in msg.splitlines():
+            self.client.write(':{} PRIVMSG {} :{}'.format(
+                sender.prefix,
+                self.name, line))
 
 
 class Client:
     def __init__(self, server, reader, writer, options):
         self.server = server
         self.options = Namespace()
-        for k in ['heartbeat', 'ignore', 'join', 'dcc_send']:
+        for k in ['heartbeat', 'ignore', 'ignore_display_name', 'join', 'dcc_send']:
             setattr(self.options, k, getattr(options, k))
         self.reader = reader
         self.writer = writer
@@ -873,11 +922,11 @@ class Client:
         self.nick = None
         self.registered = False
         self.mode = ''
-        self.channels = {}          # joined, name -> channel
-        self.name2qq_room = {}      # name -> QQ chatroom
-        self.gid2qq_room = {}       # gid(group)/did(discuss) -> QQRoom
-        self.nick2qq_user = {}      # nick -> IRC user or QQ user (friend or room contact)
-        self.uin2qq_user = {}  # uin -> QQUser
+        self.channels = {}               # joined, name -> channel
+        self.name2special_room = {}      # name -> QQ chatroom
+        self.gid2special_room = {}       # gid(group)/did(discuss) -> SpecialChannel
+        self.nick2special_user = {}      # nick -> IRC user or QQ user (friend or room contact)
+        self.uin2special_user = {}  # uin -> SpecialUser
         self.uin = 0
 
     def enter(self, channel):
@@ -889,36 +938,40 @@ class Client:
     def auto_join(self, room):
         for regex in self.options.ignore or []:
             if re.search(regex, room.name):
-                break
-        else:
-            room.on_join(self)
+                return
+        for regex in self.options.ignore_display_name or []:
+            if re.search(regex, room.topic):
+                return
+        room.on_join(self)
 
-    def has_qq_user(self, nick):
-        return irc_lower(nick) in self.nick2qq_user
+    def has_special_user(self, nick):
+        return irc_lower(nick) in self.nick2special_user
 
-    def has_qq_room(self, name):
-        return irc_lower(name) in self.name2qq_room
+    def has_special_room(self, name):
+        return irc_lower(name) in self.name2special_room
 
-    def get_qq_user(self, nick):
-        return self.nick2qq_user[irc_lower(nick)]
+    def get_special_user(self, nick):
+        return self.nick2special_user[irc_lower(nick)]
 
-    def get_qq_room(self, name):
-        return self.name2qq_room[irc_lower(name)]
+    def get_special_room(self, name):
+        return self.name2special_room[irc_lower(name)]
 
-    def remove_qq_user(self, nick):
-        del self.nick2qq_user[irc_lower(nick)]
+    def remove_special_user(self, nick):
+        del self.nick2special_user[irc_lower(nick)]
 
-    def ensure_qq_user(self, record, friend):
+    def ensure_special_user(self, record, friend=0):
         assert isinstance(record['uin'], int)
         assert isinstance(record['nick'], str)
-        if record['uin'] in self.uin2qq_user:
-            user = self.uin2qq_user[record['uin']]
-            self.remove_qq_user(user.nick)
+        if record['uin'] == self.uin:
+            return self
+        if record['uin'] in self.uin2special_user:
+            user = self.uin2special_user[record['uin']]
+            self.remove_special_user(user.nick)
             user.update(self, record, friend)
         else:
-            user = QQUser(self, record, friend)
-            self.uin2qq_user[user.uin] = user
-        self.nick2qq_user[irc_lower(user.nick)] = user
+            user = SpecialUser(self, record, friend)
+            self.uin2special_user[user.uin] = user
+        self.nick2special_user[irc_lower(user.nick)] = user
         return user
 
     def is_in_channel(self, name):
@@ -930,21 +983,21 @@ class Client:
     def remove_channel(self, channelname):
         del self.channels[irc_lower(channelname)]
 
-    def ensure_qq_room(self, record):
+    def ensure_special_room(self, record):
         assert isinstance(record['gid'], int)
         assert isinstance(record['name'], str)
         assert isinstance(record.get('memo', ''), str)
         assert isinstance(record.get('owner', -1), int)
-        if record['gid'] in self.gid2qq_room:
-            room = self.gid2qq_room[record['gid']]
-            del self.name2qq_room[irc_lower(room.name)]
+        if record['gid'] in self.gid2special_room:
+            room = self.gid2special_room[record['gid']]
+            del self.name2special_room[irc_lower(room.name)]
             room.update(self, record)
         else:
-            room = QQRoom(self, record)
-            self.gid2qq_room[room.gid] = room
+            room = SpecialChannel(self, record)
+            self.gid2special_room[room.gid] = room
             if self.options.join == 'all':
                 self.auto_join(room)
-        self.name2qq_room[irc_lower(room.name)] = room
+        self.name2special_room[irc_lower(room.name)] = room
         return room
 
     def disconnect(self, quitmsg):
@@ -992,16 +1045,16 @@ class Client:
         self.reply('374 {} :End of INFO list', self.nick)
 
     def err_nosuchnick(self, name):
-        self.reply('401 {} {} :Not such nick/channel', self.nick, name)
+        self.reply('401 {} {} :No such nick/channel', self.nick, name)
 
     def err_nosuchserver(self, name):
         self.reply('402 {} {} :No such server', self.nick, name)
 
     def err_nosuchchannel(self, channelname):
-        self.reply('403 {} {} :Not such channel', self.nick, channelname)
+        self.reply('403 {} {} :No such channel', self.nick, channelname)
 
     def err_noorigin(self):
-        self.reply('409 {} :Not origin specified', self.nick)
+        self.reply('409 {} :No origin specified', self.nick)
 
     def err_norecipient(self, command):
         self.reply('411 {} :No recipient given ({})', self.nick, command)
@@ -1133,33 +1186,39 @@ class Client:
 
     def on_websocket(self, data):
         command = data['command']
-        if type(QQCommands.__dict__.get(command)) == staticmethod:
-            getattr(QQCommands, command)(self, data)
+        if type(SpecialCommands.__dict__.get(command)) == staticmethod:
+            getattr(SpecialCommands, command)(self, data)
 
     def on_websocket_open(self, peername):
         status = StatusChannel.instance
         #self.status('WebSocket client connected from {}'.format(peername))
 
     def on_websocket_close(self, peername):
-        # PART all QQ chatrooms, these chatrooms will be garbage collected
-        for room in self.gid2qq_room.values():
+        # PART all special channels, these chatrooms will be garbage collected
+        for room in self.name2special_room.values():
             if room.joined:
                 room.on_part(self, 'WebSocket client disconnection')
-        self.name2qq_room.clear()
-        self.gid2qq_room.clear()
+        self.name2special_room.clear()
+        self.gid2special_room.clear()
 
         # instead of flooding +qq with massive PART messages,
         # take the shortcut by rejoining the client
-        self.nick2qq_user.clear()
-        self.uin2qq_user.clear()
+        self.nick2special_user.clear()
+        self.uin2special_user.clear()
         status = StatusChannel.instance
         status.shadow_members.get(self, set()).clear()
         if self in status.members:
             status.on_part(self, 'WebSocket client disconnected from {}'.format(peername))
             status.on_join(self)
 
+    def on_websocket_message(self, data):
+        msg = data['message']
+        sender = self.ensure_special_user(data['sender'])
+        for line in msg.splitlines():
+            self.write(':{} PRIVMSG {} :{}'.format(
+                sender.prefix, self.nick, line))
 
-class QQUser:
+class SpecialUser:
     def __init__(self, client, record, friend):
         self.client = client
         self.channels = set()
@@ -1170,21 +1229,23 @@ class QQUser:
 
     @property
     def prefix(self):
-        return '{}!{}@QQ'.format(self.nick, self.uin)
+        return '{}!{}@{}'.format(self.nick, self.uin, im_name)
+
+    def name(self):
+        base = re.sub('^[&#!+]*', '', irc_escape(self.record.get('nick', '')))
+        return base or 'Guest'
 
     def update(self, client, record, friend):
         self.record.update(record)
         self.uin = record['uin']
         old_nick = getattr(self, 'nick', None)
-        base = re.sub('^[&#!+]*', '', irc_escape(self.record.get('nick', '')))
-        if not base:
-            base = 'Guest'
+        base = self.name()
         suffix = ''
         while 1:
             nick = base+suffix
             if nick and (nick == old_nick or
                          irc_lower(nick) != irc_lower(client.nick) and
-                         not client.has_qq_user(nick)):
+                         not client.has_special_user(nick)):
                 break
             suffix = str(int(suffix or 0)+1)
         if nick != old_nick:
@@ -1196,11 +1257,19 @@ class QQUser:
             if not self.is_friend:
                 self.is_friend = True
                 StatusChannel.instance.on_join(self)
+                for channel in self.channels:
+                    if isinstance(channel, SpecialChannel):
+                        channel.members[self] = 'v'
+                        channel.voice_event(self)
         # non_friend
         elif friend < 0:
             if self.is_friend:
                 self.is_friend = False
                 StatusChannel.instance.on_part(self)
+                for channel in self.channels:
+                    if isinstance(channel, SpecialChannel):
+                        channel.members[self] = ''
+                        channel.devoice_event(self)
         # unsure
 
     def enter(self, channel):
@@ -1214,24 +1283,24 @@ class QQUser:
 
     def on_who_member(self, client, channelname):
         client.reply('352 {} {} {} {} {} {} H :0 {}', client.nick, channelname,
-                     self.uin, 'QQ', client.server.name,
+                     self.uin, im_name, client.server.name,
                      self.nick, self.record['nick'])
 
     def on_whois(self, client):
         client.reply('311 {} {} {} {} * :{}', client.nick, self.nick,
-                     self.uin, 'QQ', self.record['nick'])
+                     self.uin, im_name, self.record['nick'])
 
     def on_websocket_message(self, data):
         msg = data['message']
         for line in msg.splitlines():
             self.client.write(':{} PRIVMSG {} :{}'.format(
-                self.prefix, self.client.nick, line))
+                self.client.prefix, self.nick, line))
 
 
 class Server:
     valid_nickname = re.compile(r"^[][\`_^{|}A-Za-z][][\`_^{|}A-Za-z0-9-]{0,50}$")
     # initial character `+` is reserved for special channels
-    # initial character `&` is reserved for QQ chatrooms
+    # initial character `&` is reserved for special chatrooms
     valid_channelname = re.compile(r"^[#!][^\x00\x07\x0a\x0d ,:]{0,50}$")
     instance = None
 
@@ -1267,7 +1336,7 @@ class Server:
     def get_channel(self, channelname):
         return self.channels[irc_lower(channelname)]
 
-    # IRC channel or QQ chatroom
+    # IRC channel or special chatroom
     def ensure_channel(self, channelname):
         if self.has_channel(channelname):
             return self.channels[irc_lower(channelname)]
@@ -1282,7 +1351,7 @@ class Server:
 
     def change_nick(self, client, new):
         lower = irc_lower(new)
-        if lower in self.nicks or lower in client.nick2qq_user:
+        if lower in self.nicks or lower in client.nick2special_user:
             client.err_nicknameinuse(new)
         elif not Server.valid_nickname.match(new):
             client.err_errorneusnickname(new)
@@ -1306,7 +1375,7 @@ class Server:
     def start(self, loop):
         self.loop = loop
         self.servers = []
-        for i in self.options.listen:
+        for i in self.options.listen_ircd if self.options.listen_ircd else self.options.listen:
             self.servers.append(loop.run_until_complete(
                 asyncio.streams.start_server(self._accept, i, self.options.port)))
 
@@ -1324,12 +1393,16 @@ class Server:
 def main():
     ap = ArgumentParser(description='webqqircd brings wx.qq.com to IRC clients')
     ap.add_argument('-d', '--debug', action='store_true', help='run ipdb on uncaught exception')
+    ap.add_argument('-I', '--ignore-display-name', nargs='*',
+                    help='list of ignored regex, do not auto join to a '+im_name+' chatroom whose DisplayName matches')
     ap.add_argument('-i', '--ignore', nargs='*',
-                    help='list of ignored regex, do not auto join to a QQ chatroom whose name matches')
+                    help='list of ignored regex, do not auto join to a '+im_name+' chatroom whose channel name(generated from DisplayName) matches')
     ap.add_argument('-j', '--join', choices=['all', 'auto', 'manual'], default='auto',
-                    help='join mode for QQ chatrooms. all: join all after connected; auto: join after the first message arrives; manual: no automatic join')
+                    help='join mode for '+im_name+' chatrooms. all: join all after connected; auto: join after the first message arrives; manual: no automatic join')
     ap.add_argument('-l', '--listen', nargs='*', default=['127.0.0.1'],
                     help='IRC/HTTP/WebSocket listen addresses')
+    ap.add_argument('--listen-ircd', nargs='*',
+                    help='IRC listen addresses (overriding --listen value for IRC server)')
     ap.add_argument('-p', '--port', type=int, default=6668,
                     help='IRC server listen port')
     ap.add_argument('-q', '--quiet', action='store_const', const=logging.WARN, dest='loglevel')
@@ -1342,7 +1415,6 @@ def main():
     ap.add_argument('--tls-cert', help='TLS certificate for HTTPS/WebSocket over TLS')
     ap.add_argument('--tls-key', help='TLS key for HTTPS/WebSocket over TLS')
     options = ap.parse_args()
-    print(options)
 
     if sys.platform == 'linux':
         # send to syslog if run as a daemon (no controlling terminal)

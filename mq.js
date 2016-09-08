@@ -47,11 +47,14 @@ var ws = new MyWebSocket('wss://127.0.0.1:9002')
 var consolelog = console.log.bind(console)
 var consoleerror = console.error.bind(console)
 var modules = {}
+var deliveredSelf = false
 var deliveredContact = new Map()
 var deliveredRoomContact = new Map()
+var requestedRoomInfo = new Set()
 var webqq_chat
 
 function webqqircd_reset() {
+    deliveredSelf = false
     deliveredContact.clear()
     deliveredRoomContact.clear()
 }
@@ -60,6 +63,12 @@ function webqqircd_reset() {
 setInterval(() => {
     try {
         var buddylist = modules['mq.model.buddylist'], self = buddylist.getSelfUin()
+
+        if (! deliveredSelf) {
+            ws.send({command: 'self', uin: self})
+            deliveredSelf = true
+        }
+
         for (var x of buddylist.getFriends()) {
             var nick = x.mark || x.nick
             if (x.uin != self && ! x.isStrange && (! deliveredContact.has(x.uin) || deliveredContact.get(x.uin) != nick)) {
@@ -67,11 +76,16 @@ setInterval(() => {
                 deliveredContact.set(x.uin, nick)
             }
         }
+
         var rooms = Object.assign({}, buddylist.getGroups(), buddylist.getDiscuss())
         for (var gid in rooms) {
             gid = +gid
-            var x = rooms[gid], name = x.name, info = JSON.stringify(x)
-            if (! deliveredRoomContact.has(gid) || deliveredRoomContact.get(gid) != info) {
+            var x = rooms[gid], name = x.name, len = x.members ? x.members.length : 0
+            if (! requestedRoomInfo.has(gid)) {
+                buddylist.getBuddyInfo(gid, x.type)
+                requestedRoomInfo.add(gid)
+            }
+            if (! deliveredRoomContact.has(gid) || deliveredRoomContact.get(gid) !== len) {
                 var members = []
                 if (x.members)
                     for (var y of x.members) {
@@ -81,7 +95,7 @@ setInterval(() => {
                         members.push(y)
                     }
                 ws.send({command: 'room', record: {gid: gid, name: name, memo: x.memo, members: members}})
-                deliveredRoomContact.set(gid, info)
+                deliveredRoomContact.set(gid, len)
             }
         }
     } catch (ex) {
@@ -99,6 +113,9 @@ ws.onmessage = data => {
             ws.close()
             ws.open(false)
             break
+        case 'eval':
+            ws.send({command: 'web_debug', input: data.expr, result: eval('(' + data.expr + ')')})
+            break
         case 'send_text_message':
             var buddylist = modules['mq.model.buddylist']
             if (buddylist.getFriendByUin(data.receiver))
@@ -108,7 +125,7 @@ ws.onmessage = data => {
             else
                 webqq_chat.onStartChat({uin: data.receiver, did: data.receiver, type: 'discuss'})
             webqq_chat.onSendMessage({textContent: data.message})
-            break;
+            break
         }
     } catch (ex) {
         consoleerror(ex.stack)
@@ -7075,14 +7092,16 @@ define("mq.presenter.chat", ["./mq.i18n"], function() {
 
                 //@ PATCH
                 try {
-                    var u = p.from_user
-                    if (! u.isSelf) {
+                    var buddylist = modules['mq.model.buddylist']
+                    var from = p.from_user, from_uin = from.uin, from_nick = from.cardName || from.mark || from.nick
+                    var to = p.send_to || buddylist.getSelfInfo(), to_uin = to.uin, to_nick = to.cardName || to.mark || to.nick
+                    if (! from.isSelf)
                         for (var line of p.content)
                             if (typeof line === 'string')
                                 ws.send({command: 'message',
-                                        sender: {uin: u.uin, nick: u.cardName || u.mark || u.nick},
+                                        sender: {uin: from_uin, nick: from_nick},
+                                        receiver: {uin: to_uin, nick: to_nick},
                                         message: line.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')})
-                    }
                 } catch (ex) {
                     consoleerror(ex.stack)
                 }
@@ -7097,18 +7116,18 @@ define("mq.presenter.chat", ["./mq.i18n"], function() {
                 //@ PATCH
                 try {
                     var buddylist = modules['mq.model.buddylist'], self = buddylist.getSelfUin()
-                    var g = p.send_to || p.from_group
-                    var u = p.sender, uin, nick
-                    if (u && u.isSelf) return
-                    if (u)
-                        uin = u.uin, nick = u.cardName || u.mark || u.nick
+                    var from = p.sender, from_uin, from_nick
+                    if (from)
+                        from_uin = from.uin, from_nick = from.cardName || from.mark || from.nick
                     else
-                        uin = nick = ''+p.sender_uin
+                        from_uin = from_nick = ''+p.sender_uin
+                    var to = p.from_group
+                    if (from && from.isSelf) return
                     for (var line of p.content)
                         if (typeof line === 'string')
-                            ws.send({command: 'message',
-                                    room: {gid: g.gid, name: g.name, memo: g.memo, owner: g.owner},
-                                    sender: {uin: uin, nick: nick},
+                            ws.send({command: 'room_message',
+                                    sender: {uin: from_uin, nick: from_nick},
+                                    receiver: {gid: to.gid, name: to.name, memo: to.memo, owner: to.owner},
                                     message: line.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/, '&')})
                 } catch (ex) {
                     consoleerror(ex.stack)
@@ -7123,13 +7142,15 @@ define("mq.presenter.chat", ["./mq.i18n"], function() {
                 //@ PATCH TODO
                 try {
                     var buddylist = modules['mq.model.buddylist'], self = buddylist.getSelfUin()
-                    var g = p.send_to || p.from_discuss
-                    var u = p.sender
-                    if (! u.isSelf)
-                        ws.send({command: 'message',
-                                room: {gid: g.did, name: g.name, memo: g.memo},
-                                sender: {uin: u.uin, nick: u.cardName || u.mark || u.nick},
-                                message: p.content[p.content.length-1].replace(/&gt;/g, '>').replace(/&amp;/, '&')})
+                    var from = p.sender, from_uin = from.uin, from_nick = from.cardName || from.mark || from.nick
+                    var to = p.from_discuss
+                    if (! from.isSelf)
+                        for (var line of p.content)
+                            if (typeof line === 'string')
+                                ws.send({command: 'room_message',
+                                        sender: {uin: from_uin, nick: from_nick},
+                                        receiver: {gid: to.did, name: to.name, memo: to.memo},
+                                        message: line.replace(/&gt;/g, '>').replace(/&amp;/, '&')})
                 } catch (ex) {
                     consoleerror(ex.stack)
                 }
