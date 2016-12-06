@@ -117,6 +117,11 @@ ws.onmessage = data => {
             ws.send({command: 'web_debug', input: data.expr, result: eval('(' + data.expr + ')')})
             break
         case 'send_text_message':
+            var body
+            if (data.message.startsWith('!m '))
+                body = data.message.substr(3).replace(/\\n/g, '\n').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            else
+                body = data.message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
             var buddylist = modules['mq.model.buddylist']
             if (buddylist.getFriendByUin(data.receiver))
                 webqq_chat.onStartChat({uin: data.receiver, type: 'friend'})
@@ -124,7 +129,7 @@ ws.onmessage = data => {
                 webqq_chat.onStartChat({uin: data.receiver, gid: data.receiver, type: 'group'})
             else
                 webqq_chat.onStartChat({uin: data.receiver, did: data.receiver, type: 'discuss'})
-            webqq_chat.onSendMessage({textContent: data.message})
+            webqq_chat.onSendMessage({textContent: body})
             break
         }
     } catch (ex) {
@@ -7099,6 +7104,7 @@ define("mq.presenter.chat", ["./mq.i18n"], function() {
                         for (var line of p.content)
                             if (typeof line === 'string')
                                 ws.send({command: 'message',
+                                        time: p.time,
                                         sender: {uin: from_uin, nick: from_nick},
                                         receiver: {uin: to_uin, nick: to_nick},
                                         message: line.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')})
@@ -7126,6 +7132,7 @@ define("mq.presenter.chat", ["./mq.i18n"], function() {
                     for (var line of p.content)
                         if (typeof line === 'string')
                             ws.send({command: 'room_message',
+                                    time: p.time,
                                     sender: {uin: from_uin, nick: from_nick},
                                     receiver: {gid: to.gid, name: to.name, memo: to.memo, owner: to.owner},
                                     message: line.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/, '&')})

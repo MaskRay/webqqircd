@@ -2,7 +2,7 @@
 from argparse import ArgumentParser, Namespace
 from aiohttp import web
 #from ipdb import set_trace as bp
-from datetime import datetime
+from datetime import datetime, timezone
 import aiohttp, asyncio, inspect, json, logging.handlers, os, pprint, random, re, \
     signal, socket, ssl, string, sys, time, traceback, uuid, weakref
 
@@ -130,6 +130,17 @@ class Web(object):
             except:
                 pass
 
+    def web_eval(self, expr):
+        for ws in self.ws:
+            try:
+                ws.send_str(json.dumps({
+                    'command': 'eval',
+                    'expr': expr,
+                }))
+            except:
+                pass
+            break
+
 ### IRC utilities
 
 def irc_lower(s):
@@ -149,11 +160,29 @@ def irc_escape(s):
 
 class UnregisteredCommands(object):
     @staticmethod
+    def cap(client, *args):
+        if not args: return
+        comm = args[0].lower()
+        if comm == 'ls' or comm == 'list':
+            client.reply('CAP * {} :server-time', args[0])
+        elif comm == 'req':
+            client.capabilities = set(['server-time']) & set(args[1].split())
+            client.reply('CAP * ACK :{}', ' '.join(client.capabilities))
+
+    @staticmethod
     def nick(client, *args):
+        if len(client.server.options.irc_password) and not client.authenticated:
+            client.err_passwdmismatch('NICK')
+            return
         if not args:
             client.err_nonicknamegiven()
             return
         client.server.change_nick(client, args[0])
+
+    @staticmethod
+    def pass_(client, password):
+        if len(client.server.options.irc_password) and password == client.server.options.irc_password:
+            client.authenticated = True
 
     @staticmethod
     def quit(client):
@@ -161,6 +190,9 @@ class UnregisteredCommands(object):
 
     @staticmethod
     def user(client, user, mode, _, realname):
+        if len(client.server.options.irc_password) and not client.authenticated:
+            client.err_passwdmismatch('USER')
+            return
         client.user = user
         client.realname = realname
 
@@ -169,6 +201,10 @@ class RegisteredCommands:
     @staticmethod
     def away(client):
         pass
+
+    @staticmethod
+    def cap(client, *args):
+        UnregisteredCommands.cap(client, *args)
 
     @staticmethod
     def info(client):
@@ -403,6 +439,7 @@ class SpecialCommands:
     @staticmethod
     def message(client, data):
         client.ensure_special_user(data['receiver']).on_websocket_message(data)
+    @staticmethod
     def room_contact(client, data):
         record = data['record']
         debug('room_contact: ' + ', '.join([k + ':' + repr(record.get(k)) for k in ['uin', 'nick']]))
@@ -439,7 +476,6 @@ class SpecialCommands:
 
     @staticmethod
     def send_text_message_nak(client, data):
-        print(data)
         receiver = data['receiver']
         msg = data['message']
         if client.has_special_room(receiver):
@@ -450,6 +486,10 @@ class SpecialCommands:
             user = client.get_special_user(receiver)
             client.write(':{} PRIVMSG {} :[文字发送失败] {}'.format(
                 client.prefix, user.nick, msg))
+
+    @staticmethod
+    def web_debug(client, data):
+        debug('web_debug: ' + repr(data))
 
 ### Channels: StandardChannel, StatusChannel, SpecialChannel
 
@@ -600,7 +640,7 @@ class StandardChannel(Channel):
         elif 'o' in self.members.pop(client):
             user = next(iter(self.members))
             self.members[user] += 'o'
-            self.op_event(self, user)
+            self.op_event(user)
         client.leave(self)
         return True
 
@@ -773,6 +813,11 @@ class SpecialChannel(Channel):
         self.idle = True      # no messages yet
         self.joined = False   # `client` has not joined
         self.update(client, record)
+        self.log_file = None
+
+    @property
+    def nick(self):
+        return self.name
 
     def update(self, client, record):
         self.record.update(record)
@@ -903,9 +948,14 @@ class SpecialChannel(Channel):
         if sender not in self.members:
             self.on_join(sender)
         for line in msg.splitlines():
-            self.client.write(':{} PRIVMSG {} :{}'.format(
-                sender.prefix,
-                self.name, line))
+            self.client.server.irc_log(self, datetime.fromtimestamp(data['time']/1000), sender, line)
+            if 'server-time' in self.client.capabilities:
+                self.client.write('@time={}Z :{} PRIVMSG {} :{}'.format(
+                    datetime.fromtimestamp(data['time']/1000, timezone.utc).strftime('%FT%T.%f')[:23],
+                    sender.prefix, self.name, line))
+            else:
+                self.client.write(':{} PRIVMSG {} :{}'.format(
+                    sender.prefix, self.name, line))
 
 
 class Client:
@@ -928,6 +978,8 @@ class Client:
         self.nick2special_user = {}      # nick -> IRC user or QQ user (friend or room contact)
         self.uin2special_user = {}  # uin -> SpecialUser
         self.uin = 0
+        self.capabilities = set()
+        self.authenticated = False
 
     def enter(self, channel):
         self.channels[irc_lower(channel.name)] = channel
@@ -1089,6 +1141,9 @@ class Client:
     def err_needmoreparams(self, command):
         self.reply('461 {} {} :Not enough parameters', self.nick, command)
 
+    def err_passwdmismatch(self, command):
+        self.reply('464 * {} :Password incorrect', command)
+
     def err_nochanmodes(self, channelname):
         self.reply("477 {} {} :Channel doesn't support modes", self.nick, channelname)
 
@@ -1116,6 +1171,8 @@ class Client:
         cls = RegisteredCommands if self.registered else UnregisteredCommands
         ret = False
         cmd = irc_lower(command)
+        if cmd == 'pass':
+            cmd = cmd+'_'
         if type(cls.__dict__.get(cmd)) != staticmethod:
             self.err_unknowncommand(command)
         else:
@@ -1215,8 +1272,15 @@ class Client:
         msg = data['message']
         sender = self.ensure_special_user(data['sender'])
         for line in msg.splitlines():
-            self.write(':{} PRIVMSG {} :{}'.format(
-                sender.prefix, self.nick, line))
+            self.server.irc_log(sender, datetime.fromtimestamp(data['time']/1000), sender, line)
+            if 'server-time' in self.capabilities:
+                self.write('@time={}Z :{} PRIVMSG {} :{}'.format(
+                    datetime.fromtimestamp(data['time']/1000, timezone.utc).strftime('%FT%T.%f')[:23],
+                    sender.prefix, self.nick, line))
+            else:
+                self.write(':{} PRIVMSG {} :{}'.format(
+                    sender.prefix, self.nick, line))
+
 
 class SpecialUser:
     def __init__(self, client, record, friend):
@@ -1226,6 +1290,7 @@ class SpecialUser:
         self.record = {}
         self.uin = 0
         self.update(client, record, friend)
+        self.log_file = None
 
     @property
     def prefix(self):
@@ -1293,8 +1358,14 @@ class SpecialUser:
     def on_websocket_message(self, data):
         msg = data['message']
         for line in msg.splitlines():
-            self.client.write(':{} PRIVMSG {} :{}'.format(
-                self.client.prefix, self.nick, line))
+            self.client.server.irc_log(self, datetime.fromtimestamp(data['time']/1000), self.client, line)
+            if 'server-time' in self.client.capabilities:
+                self.client.write('@time={}Z :{} PRIVMSG {} :{}'.format(
+                    datetime.fromtimestamp(data['time']/1000, timezone.utc).strftime('%FT%T.%f')[:23],
+                    self.client.prefix, self.nick, line))
+            else:
+                self.client.write(':{} PRIVMSG {} :{}'.format(
+                    self.client.prefix, self.nick, line))
 
 
 class Server:
@@ -1372,12 +1443,12 @@ class Server:
     def remove_nick(self, nick):
         del self.nicks[irc_lower(nick)]
 
-    def start(self, loop):
+    def start(self, loop, tls):
         self.loop = loop
         self.servers = []
-        for i in self.options.listen_ircd if self.options.listen_ircd else self.options.listen:
+        for i in self.options.irc_listen if self.options.irc_listen else self.options.listen:
             self.servers.append(loop.run_until_complete(
-                asyncio.streams.start_server(self._accept, i, self.options.port)))
+                asyncio.streams.start_server(self._accept, i, self.options.irc_port, ssl=tls)))
 
     def stop(self):
         for i in self.servers:
@@ -1389,31 +1460,55 @@ class Server:
         for client in self.clients:
             client.on_websocket(data)
 
+    def irc_log(self, channel, local_time, sender, line):
+        if self.options.logger_mask is None:
+            return
+        for regex in self.options.logger_ignore or []:
+            if re.search(regex, channel.name):
+                return
+        filename = local_time.strftime(self.options.logger_mask.replace('$channel', channel.nick))
+        time_str = local_time.strftime(self.options.logger_time_format.replace('$channel', channel.nick))
+        if channel.log_file is None or channel.log_file.name != filename:
+            if channel.log_file is not None:
+                channel.log_file.close()
+            os.makedirs(os.path.dirname(filename), exist_ok=True)
+            channel.log_file = open(filename, 'a')
+        channel.log_file.write('{}\t{}\t{}\n'.format(time_str, sender.nick, line))
+        channel.log_file.flush()
+
 
 def main():
     ap = ArgumentParser(description='webqqircd brings wx.qq.com to IRC clients')
     ap.add_argument('-d', '--debug', action='store_true', help='run ipdb on uncaught exception')
-    ap.add_argument('-I', '--ignore-display-name', nargs='*',
-                    help='list of ignored regex, do not auto join to a '+im_name+' chatroom whose DisplayName matches')
+    ap.add_argument('--dcc-send', type=int, default=10*1024*1024, help='size limit receiving from DCC SEND. 0: disable DCC SEND')
+    ap.add_argument('--heartbeat', type=int, default=30, help='time to wait for IRC commands. The server will send PING and close the connection after another timeout of equal duration if no commands is received.')
+    ap.add_argument('--http-cert', help='TLS certificate for HTTPS/WebSocket over TLS. You may concatenate certificate+key, specify a single PEM file and omit `--http-key`. Use HTTP if neither --http-cert nor --http-key is specified')
+    ap.add_argument('--http-key', help='TLS key for HTTPS/WebSocket over TLS')
+    ap.add_argument('--http-listen', nargs='*',
+                    help='HTTP/WebSocket listen addresses (overriding --listen)')
+    ap.add_argument('--http-port', type=int, default=9002, help='HTTP/WebSocket listen port, default: 9002')
+    ap.add_argument('--http-root', default=os.path.dirname(__file__), help='HTTP root directory (serving injector.js)')
     ap.add_argument('-i', '--ignore', nargs='*',
                     help='list of ignored regex, do not auto join to a '+im_name+' chatroom whose channel name(generated from DisplayName) matches')
+    ap.add_argument('-I', '--ignore-display-name', nargs='*',
+                    help='list of ignored regex, do not auto join to a '+im_name+' chatroom whose DisplayName matches')
+    ap.add_argument('--irc-cert', help='TLS certificate for IRC over TLS. You may concatenate certificate+key, specify a single PEM file and omit `--irc-key`. Use plain IRC if neither --irc-cert nor --irc-key is specified')
+    ap.add_argument('--irc-key', help='TLS key for IRC over TLS')
+    ap.add_argument('--irc-listen', nargs='*',
+                    help='IRC listen addresses (overriding --listen)')
+    ap.add_argument('--irc-password', default='', help='Set the IRC connection password')
+    ap.add_argument('--irc-port', type=int, default=6668,
+                    help='IRC server listen port. defalt: 6668')
     ap.add_argument('-j', '--join', choices=['all', 'auto', 'manual'], default='auto',
-                    help='join mode for '+im_name+' chatrooms. all: join all after connected; auto: join after the first message arrives; manual: no automatic join')
+                    help='join mode for '+im_name+' chatrooms. all: join all after connected; auto: join after the first message arrives; manual: no automatic join. default: auto')
     ap.add_argument('-l', '--listen', nargs='*', default=['127.0.0.1'],
-                    help='IRC/HTTP/WebSocket listen addresses')
-    ap.add_argument('--listen-ircd', nargs='*',
-                    help='IRC listen addresses (overriding --listen value for IRC server)')
-    ap.add_argument('-p', '--port', type=int, default=6668,
-                    help='IRC server listen port')
-    ap.add_argument('-q', '--quiet', action='store_const', const=logging.WARN, dest='loglevel')
-    ap.add_argument('--http-root', default=os.path.dirname(__file__), help='HTTP root directory (serving mq.js)')
-    ap.add_argument('-v', '--verbose', action='store_const', const=logging.DEBUG, dest='loglevel')
-    ap.add_argument('--dcc-send', type=int, default=10*1024*1024, help='size limit receiving from DCC SEND. 0: disable DCC SEND')
+                    help='IRC/HTTP/WebSocket listen addresses, default: 127.0.0.1')
+    ap.add_argument('--logger-ignore', nargs='*', help='list of ignored regex, do not log contacts/chatrooms whose names match')
+    ap.add_argument('--logger-mask', help='WeeChat logger.mask.irc')
+    ap.add_argument('--logger-time-format', default='%H:%M', help='WeeChat logger.file.time_format')
     ap.add_argument('--password', help='admin password')
-    ap.add_argument('--heartbeat', type=int, default=30, help='time to wait for IRC commands. The server will send PING and close the connection after another timeout of equal duration if no commands is received.')
-    ap.add_argument('--web-port', type=int, default=9002, help='HTTP/WebSocket listen port')
-    ap.add_argument('--tls-cert', help='TLS certificate for HTTPS/WebSocket over TLS')
-    ap.add_argument('--tls-key', help='TLS key for HTTPS/WebSocket over TLS')
+    ap.add_argument('-q', '--quiet', action='store_const', const=logging.WARN, dest='loglevel')
+    ap.add_argument('-v', '--verbose', action='store_const', const=logging.DEBUG, dest='loglevel')
     options = ap.parse_args()
 
     if sys.platform == 'linux':
@@ -1428,11 +1523,18 @@ def main():
         logging.basicConfig(format='%(levelname)s: %(message)s')
     logging.root.setLevel(options.loglevel or logging.INFO)
 
-    if options.tls_cert:
-        tls = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
-        tls.load_cert_chain(options.tls_cert, options.tls_key)
+    if options.http_cert or options.http_key:
+        http_tls = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
+        http_tls.load_cert_chain(options.http_cert or options.http_key,
+                                 options.http_key or options.http_cert)
     else:
-        tls = None
+        http_tls = None
+    if options.irc_cert or options.irc_key:
+        irc_tls = ssl.SSLContext(ssl.PROTOCOL_TLSv1_2)
+        irc_tls.load_cert_chain(options.irc_cert or options.irc_key,
+                                 options.irc_key or options.irc_cert)
+    else:
+        irc_tls = None
 
     loop = asyncio.get_event_loop()
     if options.debug:
@@ -1440,8 +1542,9 @@ def main():
     server = Server(options)
     web = Web(options.http_root)
 
-    server.start(loop)
-    web.start(options.listen, options.web_port, tls, loop)
+    server.start(loop, irc_tls)
+    web.start(options.http_listen if options.http_listen else options.listen,
+              options.http_port, http_tls, loop)
     try:
         loop.run_forever()
     except KeyboardInterrupt:

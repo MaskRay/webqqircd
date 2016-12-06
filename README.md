@@ -1,17 +1,23 @@
 # webqqircd
 
-webqqircd类似于bitlbee，在WebQQ(SmartQQ)和IRC间建起桥梁，可以使用IRC客户端收发消息。大部分代码来自[wechatircd](https://github.com/MaskRay/wechatircd)，为适配QQ做了一些修改，去除了wechatircd中的token，因此只支持单客户端。
+webqqircd类似于bitlbee，在WebQQ(SmartQQ)和IRC间建起桥梁，可以使用IRC客户端收发消息。大部分代码来自[wechatircd](https://github.com/MaskRay/wechatircd)，为适配QQ做了一些修改。
+
+```
+           IRC              WebSocket                 HTTPS
+IRC client --- webqqircd.py --------- browser        ----- wx.qq.com
+                                      modified mq.js
+```
 
 ## 原理
 
-修改WebQQ(<http://w.qq.com>用的JS，通过WebSocket把信息发送到服务端，服务端兼做IRC服务端，把IRC客户端的命令通过WebSocket传送到网页版JS执行。未实现IRC客户端，因此无法把QQ群的消息转发到另一个IRC服务器(打通两个群的bot)。
+修改WebQQ(<http://w.qq.com>用的JS，通过WebSocket把信息发送到服务端，服务端兼做IRC服务端，把IRC客户端的命令通过WebSocket传送到网页版JS执行。未实现IRC客户端，因此无法把QQ群/讨论组的消息转发到另一个IRC服务器(打通两个群的bot)。
 
 ## WebQQ局限
 
 - WebQQ不支持发送图片，也无法获悉别人发送了图片
 - 消息发送后不知道成功与否，`mq.model.chat`中`sendMsg(h)`的`onSuccess`为空函数
-- 无法获知群信息变化(如成员变化等)`mq.model.chat`中`addGroup(x)`只判断群存在与否，不判断信息变化
-- 看不到WebQQ会话内新加入的群友的消息
+- 无法获知群/讨论组信息变化(如成员变化等)`mq.model.chat`中`addGroup(x)`只判断群/讨论组存在与否，不判断信息变化
+- 看不到WebQQ会话内新加入的群/讨论组友的消息
 - 没有办法区分`&lt;`和`<`等
 
 ## 安装
@@ -21,19 +27,32 @@ webqqircd类似于bitlbee，在WebQQ(SmartQQ)和IRC间建起桥梁，可以使�
 
 ### Arch Linux
 
-安装<https://aur.archlinux.org/packages/wechatircd-git>，会自动在`/etc/wechatircd/`下生成自签名证书(见下文)，导入浏览器即可。
+- `yaourt -S webqqircd-git`。会在`/etc/webqqircd/`下生成自签名证书。
+- 把`/etc/webqqircd/cert.pem`导入到浏览器(见下文)
+- `systemctl start webqqircd`会运行`/usr/bin/webqqircd --http-cert /etc/webqqircd/cert.pem --http-key /etc/webqqircd/key.pem --http-root /usr/share/webqqircd`
+
+IRC服务器默认监听127.0.0.1:6668 (IRC)和127.0.0.1:9002 (HTTPS + WebSocket over TLS)。
+
+如果你在非本机运行，建议配置IRC over TLS，设置IRC connection password：`/usr/bin/webqqircd --http-cert /etc/webqqircd/cert.pem --http-key /etc/webqqircd/key.pem --http-root /usr/share/webqqircd --irc-cert /path/to/irc.key --irc-key /path/to/irc.cert --irc-password yourpassword`
+
+可以把HTTPS私钥证书用作IRC over TLS私钥证书。使用WeeChat的话，如果觉得让WeeChat信任证书比较麻烦(gnutls会检查hostname)，可以用：
+```
+set irc.server.qq.ssl on`
+set irc.server.qq.ssl_verify off
+set irc.server.qq.password yourpassword`
+```
 
 ### 其他发行版
 
-- `openssl req -newkey rsa:2048 -nodes -keyout a.key -x509 -out a.crt -subj '/CN=127.0.0.1' -dates 9999`创建密钥与证书。
-- 把证书导入浏览器，见下文
-- `./webqqircd.py --tls-cert a.crt --tls-key a.key`，会监听127.1:6668的IRC和127.1:9002的HTTPS与WebSocket over TLS
+- `openssl req -newkey rsa:2048 -nodes -keyout key.pem -x509 -out cert.pem -subj '/CN=127.0.0.1' -days 9999`创建密钥与证书。
+- 把`cert.pem`导入浏览器，见下文
+- `./webqqircd.py --http-cert cert.pem --http-key key.pem`
 
 ### 浏览器设置
 
 Chrome/Chromium
 
-- 访问`chrome://settings/certificates`，导入a.crt，在Authorities标签页选择该证书，Edit->Trust this certificate for identifying websites.
+- 访问`chrome://settings/certificates`，导入`cert.pem`，在Authorities标签页选择该证书，Edit->Trust this certificate for identifying websites.
 - 安装Switcheroo Redirector扩展，把<http://pub.idqqimg.com/smartqq/js/mq.js?t=20151207>重定向至<https://127.0.0.1:9002/mq.js>。
 
 Firefox
@@ -41,55 +60,72 @@ Firefox
 - 安装Redirector扩展，重定向js，设置` Applies to: Main window (address bar), Scripts`。
 - 访问重定向后的js URL，报告Your connection is not secure，Advanced->Add Exception->Confirm Security Exception
 
-## 运行
-
-### HTTPS、WebSocket over TLS
-
-推荐使用TLS。
-
-- `openssl req -newkey rsa:2048 -nodes -keyout a.key -x509 -out a.crt -subj '/CN=127.0.0.1' -dates 9999`创建密钥与证书。
-- Chrome访问`chrome://settings/certificates`，导入a.crt，在Authorities标签页选择该证书，Edit->Trust this certificate for identifying websites.
-- Chrome安装Switcheroo Redirector扩展，把<http://pub.idqqimg.com/smartqq/js/mq.js>重定向至<https://127.0.0.1:9002/mq.js>。若js更新，该路径会变化。
-- `./webqqircd.py --tls-cert a.crt --tls-key a.key`，会监听127.1:6668的IRC和127.1:9002的HTTPS与WebSocket over TLS
-
 ![](https://maskray.me/static/2016-04-11-webqqircd/demo.jpg)
 
-### HTTP、WebSocket
+## 使用
 
-如果嫌X.509太麻烦的话可以不用TLS，但Chrome会在console里给出警告。
-
-- 执行`./webqqircd.py`，会监听127.1:6668的IRC和127.1:9002的HTTP与WebSocket，HTTP用于伺服项目根目录下的`mq.js`。
-- 把<http://pub.idqqimg.com/smartqq/js/mq.js>重定向至<http://127.0.0.1:9002/mq.js>。若js更新，该路径会变化。
-- 把`mq.js` `var ws = new MyWebSocket('wss://127.0.0.1:9002')`行单引号里面的部分修改成`ws://127.0.0.1:9002`
-
-### IRC客户端
-
+- 运行`webqqircd.py`
+- 访问<http://w.qq.com>，修改后`mq.js`会向服务器发起WebSocket连接
 - IRC客户端连接127.1:6668(weechat的话使用`/server add qq 127.1/6668`)，会自动加入`+qq` channel
-- 登录<http://w.qq.com>
-- 回到IRC客户端，可以看到QQ朋友加入了`+qq` channel，在这个channel发信并不会群发，只是为了方便查看有哪些朋友。
-- QQ朋友的nick优先选取备注名(`RemarkName`)，其次为`DisplayName`(原始JS根据昵称等自动填写的一个名字)
+
+在`+qq`发信并不会群发，只是为了方便查看有哪些朋友。
 
 在`+qq` channel可以执行一些命令：
 
 - `help`，帮助
-- `status`，已获取的QQ朋友、群列表
-- `eval $password $expr`: 如果运行时带上了`--password $password`选项，这里可以eval，方便调试，比如`eval $password client.uin2qq_user`
+- `status [pattern]`，已获取的QQ朋友、群/讨论组列表，支持 pattern 参数用来筛选满足 pattern 的结果，目前仅支持子串查询。如要查询所有群/讨论组，由于群/讨论组由 `&` 开头，所以可以执行 `status &`。
+- `eval $password $expr`: 如果运行时带上了`--password $password`选项，这里可以eval，方便调试，比如`eval $password client.webqq_users`
 
-若服务端或客户端重启，刷新WebQQ。
+## 服务器选项
+
+- Join mode. There are three modes, the default is `--join auto`: join the channel upon receiving the first message. The other two are `--join all`: join all the channels; `--join manual`: no automatic join.
+- Groups that should not join automatically. This feature supplements join mode.
+  + `--ignore 'fo[o]' bar`, do not auto join chatrooms whose channel name(generated from DisplayName) matches regex `fo[o]` or `bar`
+  + `--ignore-display-name 'fo[o]' bar`, do not auto join chatrooms whose DisplayName matches regex `fo[o]` or `bar`
+- HTTP/WebSocket related options
+  + `--http-cert cert.pem`, TLS certificate for HTTPS/WebSocket. You may concatenate certificate+key, specify a single PEM file and omit `--http-key`. Use HTTP if neither --http-cert nor --http-key is specified.
+  + `--http-key key.pem`, TLS key for HTTPS/WebSocket.
+  + `--http-listen 127.1 ::1`, change HTTPS/WebSocket listen address to `127.1` and `::1`, overriding `--listen`.
+  + `--http-port 9000`, change HTTPS/WebSocket listen port to 9000.
+  + `--http-root .`, the root directory to serve `injector.js`.
+- `-l 127.0.0.1`, change IRC/HTTP/WebSocket listen address to `127.0.0.1`.
+- IRC related options
+  + `--irc-cert cert.pem`, TLS certificate for IRC over TLS. You may concatenate certificate+key, specify a single PEM file and omit `--irc-key`. Use plain IRC if neither --irc-cert nor --irc-key is specified.
+  + `--irc-key key.pem`, TLS key for IRC over TLS.
+  + `--irc-listen 127.1 ::1`, change IRC listen address to `127.1` and `::1`, overriding `--listen`.
+  + `--irc-password pass`, set the connection password to `pass`.
+  + `--irc-port 6667`, IRC server listen port.
+- Server side log
+  + `--logger-ignore '&test0' '&test1'`, list of ignored regex, do not log contacts/groups whose names match
+  + `--logger-mask '/tmp/webqq/$channel/%Y-%m-%d.log'`, format of log filenames
+  + `--logger-time-format %H:%M`, time format of server side log
 
 ## IRC命令
 
-webqqircd是个简单的IRC服务器，可以执行通常的IRC命令，可以对其他客户端私聊。
+- 标准IRC channel名以`#`开头
+- QQ群/讨论组名以`&`开头。`SpecialChannel#update`
+- 联系人带有mode `+v` (voice, 通常显示为前缀`+`)。`SpecialChannel#update_detail`
 
-以下命令会有特殊作用：
+`server-time` extension from IRC version 3.1, 3.2. `webqqircd.py` includes the timestamp (obtained from JavaScript) in messages to tell IRC clients that the message happened at the given time. See <http://ircv3.net/irc/>. See<http://ircv3.net/software/clients.html> for Client support of IRCv3.
 
-- 程序默认选项为`--join auto`，收到某个QQ群的第一条消息后会自动加入对应的channel，即开始接收该QQ群的消息。
-- `/join [channel]`表示开始接收该QQ群的消息
-- `/list`，列出所有QQ群
-- `/names`，更新当前群成员列表
-- `/part [channel]`的IRC原义为离开channel，转换为QQ代表在当前IRC会话中不再接收该QQ群的消息。不用担心，webqqircd并没有主动退出群的功能
-- `/query nick`打开与`$nick`的私聊窗口，与之私聊即为在QQ上和他/她/它对话
-- `/who channel`，查看群成员列表
+Configuration for WeeChat:
+```
+/set irc.server_default.capabilities "account-notify,away-notify,cap-notify,multi-prefix,server-time,znc.in/server-time-iso,znc.in/self-message"
+```
+
+Supported IRC commands:
+
+- `/cap`, supported capabilities.
+- `/dcc send $nick/$channel $filename`, send image or file。This feature borrows the command `/dcc send` which is well supported in IRC clients. See <https://en.wikipedia.org/wiki/Direct_Client-to-Client#DCC_SEND>.
+- `/list`, list groups.
+- `/names`, update nicks in the channel.
+- `/part $channel`, no longer receive messages from the channel. It just borrows the command `/part` and it will not leave the group.
+- `/query $nick`, open a chat window with `$nick`.
+- `/who $channel`, see the member list.
+
+Multi-line messages:
+
+- `!m line0\nline1`
 
 ## JS改动
 
@@ -105,7 +141,7 @@ webqqircd是个简单的IRC服务器，可以执行通常的IRC命令，可以�
 
 ### 定期把通讯录发送到服务端
 
-获取所有联系人(朋友、订阅号、群)，`deliveredContact`记录投递到服务端的联系人，`deliveredContact`记录同处一群的非直接联系人。
+获取所有联系人(朋友、订阅号、群/讨论组)，`deliveredContact`记录投递到服务端的联系人，`deliveredContact`记录同处一群/讨论组的非直接联系人。
 
 每隔一段时间把未投递过的联系人发送到服务端。
 
@@ -124,35 +160,11 @@ webqqircd是个简单的IRC服务器，可以执行通常的IRC命令，可以�
 ├── Channel
 │   ├── StandardChannel      `#`开头的IRC channel
 │   ├── StatusChannel        `+qq`，查看控制当前QQ会话
-│   └── QQRoom               QQ群对应的channel，仅该客户端可见
+│   └── SpecialChannel       QQ群/讨论组对应的channel，仅该客户端可见
 ├── (User)
 │   ├── Client               IRC客户端连接
-│   ├── QQUser               QQ用户对应的user，仅该客户端可见
+│   ├── SpecialUser          QQ用户对应的user，仅该客户端可见
 ├── (IRCCommands)
 │   ├── UnregisteredCommands 注册前可用命令：NICK USER QUIT
 │   ├── RegisteredCommands   注册后可用命令
-```
-
-## 我的配置
-
-<https://wiki.archlinux.org/index.php/Systemd/User>
-
-`~/.config/systemd/user/webqqircd.service`:
-```
-[Unit]
-Description=webqqircd
-Documentation=https://github.com/MaskRay/webqqircd
-After=network.target
-
-[Service]
-WorkingDirectory=%h/projects/webqqircd
-ExecStart=/home/ray/projects/webqqircd/webqqircd.py --tls-key a.key --tls-cert a.crt --password a --ignore 不想自动加入的群名0 不想自动加入的群名1
-
-[Install]
-WantedBy=multi-user.target
-```
-
-WeeChat:
-```
-/server add qq 127.1/6668 -autoconnect
 ```
