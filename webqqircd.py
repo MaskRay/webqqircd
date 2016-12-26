@@ -105,6 +105,35 @@ class Web(object):
         for ws in self.ws:
             ws.send_str(json.dumps({'command': 'close'}))
 
+    def contact_ack(self, uin):
+        for ws in self.ws:
+            try:
+                ws.send_str(json.dumps({
+                    'command': 'contact_ack',
+                    'uin': uin,
+                }))
+            except:
+                pass
+
+    def room_ack(self, gid):
+        for ws in self.ws:
+            try:
+                ws.send_str(json.dumps({
+                    'command': 'room_ack',
+                    'gid': gid,
+                }))
+            except:
+                pass
+
+    def self_ack(self):
+        for ws in self.ws:
+            try:
+                ws.send_str(json.dumps({
+                    'command': 'self_ack',
+                }))
+            except:
+                pass
+
     def send_file(self, receiver, filename, body):
         for ws in self.ws:
             try:
@@ -431,25 +460,25 @@ class RegisteredCommands:
 
 class SpecialCommands:
     @staticmethod
-    def friend(client, data):
+    def contact(client, data):
+        friend = data['friend']
         record = data['record']
-        debug('friend: ' + ', '.join([k + ':' + repr(record.get(k)) for k in ['uin', 'nick']]))
-        client.ensure_special_user(record, 1)
+        debug('{}: '.format('friend' if friend else 'room_contact') + ', '.join([k + ':' + repr(record.get(k)) for k in ['uin', 'nick']]))
+        client.ensure_special_user(record, 1 if friend else -1)
+        if client.server.has_logged_in_client():
+            Web.instance.contact_ack(record['uin'])
 
     @staticmethod
     def message(client, data):
         client.ensure_special_user(data['receiver']).on_websocket_message(data)
-    @staticmethod
-    def room_contact(client, data):
-        record = data['record']
-        debug('room_contact: ' + ', '.join([k + ':' + repr(record.get(k)) for k in ['uin', 'nick']]))
-        client.ensure_special_user(record, -1)
 
     @staticmethod
     def room(client, data):
         record = data['record']
         debug('room: ' + ', '.join([k + ':' + repr(record.get(k)) for k in ['gid', 'name', 'memo', 'owner']]))
         client.ensure_special_room(record).update_detail(record)
+        if client.server.has_logged_in_client():
+            Web.instance.room_ack(record['gid'])
 
     @staticmethod
     def room_message(client, data):
@@ -459,6 +488,8 @@ class SpecialCommands:
     def self(client, data):
         debug('self: %r', data)
         client.uin = data['uin']
+        if client.server.has_logged_in_client():
+            Web.instance.self_ack()
 
     @staticmethod
     def send_file_message_nak(client, data):
@@ -1400,6 +1431,9 @@ class Server:
             task.add_done_callback(done)
         except Exception as e:
             traceback.print_exc()
+
+    def has_logged_in_client(self):
+        return any(client.server.options.irc_password == '' or client.authenticated for client in Server.instance.clients)
 
     def has_channel(self, channelname):
         return irc_lower(channelname) in self.channels

@@ -53,7 +53,7 @@ set irc.server.qq.password yourpassword`
 Chrome/Chromium
 
 - 访问`chrome://settings/certificates`，导入`cert.pem`，在Authorities标签页选择该证书，Edit->Trust this certificate for identifying websites.
-- 安装Switcheroo Redirector扩展，把<http://pub.idqqimg.com/smartqq/js/mq.js?t=20151207>重定向至<https://127.0.0.1:9002/mq.js>。
+- 安装Switcheroo Redirector扩展，把<http://pub.idqqimg.com/smartqq/js/mq.js?t=20161220>重定向至<https://127.0.0.1:9002/mq.js>。
 
 Firefox
 
