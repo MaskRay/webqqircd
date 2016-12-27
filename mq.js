@@ -1,6 +1,6 @@
 //@ PATCH
 const Common = {
-  WEBSOCKET_URL: 'wss://127.0.0.1:9002',
+    WEBSOCKET_URL: 'wss://127.0.0.1:9002/ws',
 }
 
 class CtrlServer {
@@ -17,8 +17,6 @@ class CtrlServer {
         const addPending = (receiver, key) => {
             if (receiver === this.uin2contact) {
                 let t = +key
-                if (t !== t)
-                    debugger
                 this.pending_uin2contact.add(+key)
             }
             else if (receiver === this.gid2group)
@@ -32,7 +30,6 @@ class CtrlServer {
                     return new Proxy(target[key], {
                         set: (target2, key2, value2, receiver2) => {
                             Reflect.set(target2, key2, value2)
-                            //this.pending_uin2contact.add(+key)
                             addPending(receiver, key)
                             return true
                         }
@@ -79,16 +76,20 @@ class CtrlServer {
     }
 
     sync_contacts() {
+        const buddylist = this.modules['mq.model.buddylist']
+        if (! (buddylist && this.ws.readyState === WebSocket.OPEN)) return
         if (this.pending_self) {
-            const self = this.modules['mq.model.buddylist'].getSelfUin()
-            if (self)
+            const self = buddylist.getSelfUin()
+            if (self) {
                 this.send({
                     command: 'self',
                     uin: self,
                 })
+                this.pending_self = false
+            }
         }
-        // TODO potential race when 'self' is not accepted
-        if (this.pending_uin2contact)
+        // TODO potential race when 'self' is not acknowledged
+        if (this.pending_uin2contact.size) {
             for (let id of this.pending_uin2contact) {
                 const x = this.uin2contact[id]
                 this.send({
@@ -97,7 +98,9 @@ class CtrlServer {
                     record: {uin: x.uin, nick: x.mark || x.nick},
                 })
             }
-        if (this.pending_gid2group)
+            this.pending_uin2contact.clear()
+        }
+        if (this.pending_gid2group.size) {
             for (let id of this.pending_gid2group) {
                 const x = this.gid2group[id]
                 this.send({
@@ -105,7 +108,9 @@ class CtrlServer {
                     record: {gid: x.gid, name: x.name, memo: x.memo, members: x.members},
                 })
             }
-        if (this.pending_id2discuss)
+            this.pending_gid2group.clear()
+        }
+        if (this.pending_id2discuss.size) {
             for (let id of this.pending_id2discuss) {
                 const x = this.id2discuss[id]
                 this.send({
@@ -113,6 +118,8 @@ class CtrlServer {
                     record: {gid: x.did, name: x.name, memo: x.memo, members: x.members},
                 })
             }
+            this.pending_id2discuss.clear()
+        }
     }
 
     close() {
@@ -136,16 +143,6 @@ class CtrlServer {
                 break
             case 'eval':
                 this.send({command: 'web_debug', input: data.expr, result: eval('(' + data.expr + ')')})
-                break
-            case 'contact_ack':
-                this.pending_uin2contact.delete(data.uin)
-                break
-            case 'room_ack':
-                this.pending_gid2group.delete(data.gid)
-                this.pending_id2discuss.delete(data.gid)
-                break
-            case 'self_ack':
-                this.pending_self = false
                 break
             case 'send_text_message':
                 var body
@@ -9396,7 +9393,7 @@ define('mq.view.chat',[
                             command: 'message',
                             time: p.time,
                             sender: {uin: p.sender.uin, nick: p.sender.mark || p.sender.nick},
-                            receiver: {uin: p.send_to.uin, name: p.send_to.name},
+                            receiver: {uin: p.send_to.uin, nick: p.send_to.mark || p.send_to.nick},
                             message: content,
                         })
                     else if (p.to_type == 'group') {
