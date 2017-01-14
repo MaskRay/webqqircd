@@ -9393,7 +9393,7 @@ define('mq.view.chat',[
                             command: 'message',
                             time: p.time,
                             sender: {uin: p.sender.uin, nick: p.sender.mark || p.sender.nick},
-                            receiver: {uin: p.send_to.uin, nick: p.send_to.name},
+                            receiver: {uin: p.send_to.uin, nick: p.send_to.mark || p.send_to.nick},
                             message: content,
                         })
                     else if (p.to_type == 'group') {
