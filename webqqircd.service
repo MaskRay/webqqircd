@@ -1,0 +1,14 @@
+[Unit]
+Description=IRC server capable of controlling Web QQ
+Documentation=https://github.com/MaskRay/webqqircd
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/webqqircd --http-cert /etc/webqqircd/cert.pem --http-key /etc/webqqircd/key.pem --http-root /usr/share/webqqircd
+#server side log, N.B. use '%%' in place of '%' to specify a single percent sign, see man 5 systemd.unit
+#ExecStart=/usr/bin/webqqircd --http-cert /etc/webqqircd/cert.pem --http-key /etc/webqqircd/key.pem --http-root /usr/share/webqqircd --logger-mask '/tmp/webqqircd/$channel/%%Y-%%m-%%d.log'
+#IRC over TLS + connection password
+#ExecStart=/usr/bin/webqqircd --http-cert /etc/webqqircd/cert.pem --http-key /etc/webqqircd/key.pem --http-root /usr/share/webqqircd --irc-cert /etc/webqqircd/irc-cert.pem --irc-key /etc/webqqircd/irc-key.pem --irc-password yourpassword
+
+[Install]
+WantedBy=multi-user.target
